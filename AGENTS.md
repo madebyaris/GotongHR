@@ -49,6 +49,7 @@ Use the command named for the slice. Do not invent a replacement.
 | 0.2 | `pnpm --filter @gotonghr/db test` |
 | 0.3 | `pnpm --filter @gotonghr/api test` and `docker compose --env-file .env -f docker/docker-compose.vps.yml up -d postgres api` |
 | 0.4 | `pnpm --filter @gotonghr/web build`, `node apps/web/scripts/bundle-budget.mjs`, and `docker compose --env-file .env -f docker/docker-compose.vps.yml -f docker/docker-compose.vps.1g.yml up -d` |
+| 4.1 | `pnpm --filter @gotonghr/payroll-engine test:invariants` and `pnpm --filter @gotonghr/payroll-engine test:golden` |
 | 4.4 | `pnpm --filter @gotonghr/payslip-pdf test` |
 | Every later slice | The shared check, depcruise, and the slice command in the implementation plan |
 
