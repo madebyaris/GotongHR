@@ -31,7 +31,7 @@ export default function SignInPage() {
       queryClient.removeQueries({ queryKey: ["me", "context"] });
       await navigate({ to: "/admin" });
     } catch (caught) {
-      setError(caught instanceof ApiRequestError ? caught.message : "Email or password is wrong.");
+      setError(caught instanceof ApiRequestError ? caught.message : "Could not sign in. Try again.");
     } finally {
       setPending(false);
     }
@@ -62,6 +62,7 @@ export default function SignInPage() {
             type="password"
             className="mt-1 box-border h-11 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-base text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             value={password}
+            readOnly={pending}
             autoComplete="current-password"
             onChange={(event) => setPassword(event.target.value)}
           />

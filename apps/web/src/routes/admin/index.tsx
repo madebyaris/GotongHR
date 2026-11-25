@@ -67,7 +67,7 @@ export default function AdminPage() {
     );
   }
 
-  if (query.error || !query.data) {
+  if (!query.data) {
     return (
       <SetupColumn>
         <SetupHeader title="Set up the company" detail={null} />
@@ -103,6 +103,7 @@ function CompanySetup({ context }: { context: MeContext }) {
   const [radius, setRadius] = useState(radiusText(branch));
   const [entityId, setEntityId] = useState<string | null>(entity?.id ?? null);
   const [branchId, setBranchId] = useState<string | null>(branch?.id ?? null);
+  const [saved, setSaved] = useState<SavedCompany | null>(() => savedCompany(entity, branch));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -123,23 +124,24 @@ function CompanySetup({ context }: { context: MeContext }) {
       longitude: blankToNull(longitude),
       geofenceRadiusM: blankToNull(radius),
     });
-    const nextErrors = {
-      ...(entityParsed.ok ? {} : fieldMap(entityParsed.fields)),
-      ...(branchParsed.ok ? {} : fieldMap(branchParsed.fields)),
-    };
-    const bodyMessage = [...(entityParsed.ok ? [] : entityParsed.fields), ...(branchParsed.ok ? [] : branchParsed.fields)]
-      .find((field) => field.field === "body")?.message;
-    if (!entityParsed.ok || !branchParsed.ok) {
+    const clientFields = [
+      ...(entityParsed.ok ? [] : entityParsed.fields),
+      ...(branchParsed.ok ? [] : branchParsed.fields),
+    ];
+    if (clientFields.length > 0) {
+      const nextErrors = fieldMap(clientFields);
       setErrors(nextErrors);
-      setFormError(bodyMessage ?? "Check the highlighted fields.");
+      setFormError(formMessage(clientFields, "Check the highlighted fields."));
       focusFirst(nextErrors);
       return;
     }
+    if (!entityParsed.ok || !branchParsed.ok) return;
     setPending(true);
     setErrors({});
     setFormError(null);
     try {
       let nextEntityId = entityId;
+      let savedCompanyName = entityParsed.value.companyName;
       const entityBody = {
         companyName: entityParsed.value.companyName,
         npwp16: entityParsed.value.npwp16,
@@ -150,6 +152,7 @@ function CompanySetup({ context }: { context: MeContext }) {
           body: JSON.stringify(entityBody),
         });
         nextEntityId = created.id;
+        savedCompanyName = created.companyName;
         setEntityId(created.id);
         setCompanyName(created.companyName);
         setNpwp16(created.npwp16);
@@ -158,6 +161,7 @@ function CompanySetup({ context }: { context: MeContext }) {
           method: "PATCH",
           body: JSON.stringify(entityBody),
         });
+        savedCompanyName = updated.companyName;
         setCompanyName(updated.companyName);
         setNpwp16(updated.npwp16);
       }
@@ -171,7 +175,7 @@ function CompanySetup({ context }: { context: MeContext }) {
         longitude: branchParsed.value.longitude,
         geofenceRadiusM: branchParsed.value.geofenceRadiusM,
       };
-      const saved = branchId
+      const savedBranch = branchId
         ? await apiData<BranchRecord>(`/api/v1/branches/${branchId}`, {
             method: "PATCH",
             body: JSON.stringify(branchBody),
@@ -180,14 +184,19 @@ function CompanySetup({ context }: { context: MeContext }) {
             method: "POST",
             body: JSON.stringify(branchBody),
           });
-      setBranchId(saved.id);
-      setName(saved.name);
-      setNitku22(saved.nitku22);
-      setTimezone(saved.timezone);
-      setUmpUmkIdr(saved.umpUmkIdr);
-      setLatitude(saved.latitude ?? "");
-      setLongitude(saved.longitude ?? "");
-      setRadius(saved.geofenceRadiusM === null ? "" : String(saved.geofenceRadiusM));
+      setBranchId(savedBranch.id);
+      setName(savedBranch.name);
+      setNitku22(savedBranch.nitku22);
+      setTimezone(savedBranch.timezone);
+      setUmpUmkIdr(savedBranch.umpUmkIdr);
+      setLatitude(savedBranch.latitude ?? "");
+      setLongitude(savedBranch.longitude ?? "");
+      setRadius(savedBranch.geofenceRadiusM === null ? "" : String(savedBranch.geofenceRadiusM));
+      setSaved({
+        companyName: savedCompanyName,
+        branchName: savedBranch.name,
+        wage: formatIdr(BigInt(savedBranch.umpUmkIdr)),
+      });
     } catch (caught) {
       if (caught instanceof ApiRequestError) {
         if (caught.status === 401) {
@@ -196,7 +205,7 @@ function CompanySetup({ context }: { context: MeContext }) {
         }
         const nextErrors = fieldMap(caught.fields);
         setErrors(nextErrors);
-        setFormError(caught.fields.length > 0 ? "Check the highlighted fields." : caught.message);
+        setFormError(formMessage(caught.fields, caught.message));
         focusFirst(nextErrors);
       } else {
         setFormError("The company setup could not be saved.");
@@ -207,7 +216,7 @@ function CompanySetup({ context }: { context: MeContext }) {
     }
   }
 
-  const status = savedStatus(entityId, branchId, companyName, name, wage.ok ? formatIdr(wage.value) : null);
+  const status = statusText(entityId, saved);
 
   return (
     <SetupColumn>
@@ -368,20 +377,32 @@ function CompanySetup({ context }: { context: MeContext }) {
   );
 }
 
-function savedStatus(
-  entityId: string | null,
-  branchId: string | null,
-  companyName: string,
-  branchName: string,
-  wage: string | null,
-): string {
-  if (entityId && branchId) {
-    return wage
-      ? `Saved. ${companyName} · ${branchName}. ${wage} per month.`
-      : `Saved. ${companyName} · ${branchName}.`;
-  }
+interface SavedCompany {
+  companyName: string;
+  branchName: string;
+  wage: string;
+}
+
+function savedCompany(entity: LegalEntityRecord | null, branch: BranchRecord | null): SavedCompany | null {
+  if (!entity || !branch) return null;
+  return {
+    companyName: entity.companyName,
+    branchName: branch.name,
+    wage: formatIdr(BigInt(branch.umpUmkIdr)),
+  };
+}
+
+function statusText(entityId: string | null, saved: SavedCompany | null): string {
+  if (saved) return `Saved. ${saved.companyName} · ${saved.branchName}. ${saved.wage} per month.`;
   if (entityId) return "Legal entity saved. Add the branch.";
   return "No legal entity yet.";
+}
+
+function formMessage(fields: FieldIssue[], fallback: string): string {
+  const body = fields.find((field) => field.field === "body")?.message;
+  if (body) return body;
+  if (fields.some((field) => field.field !== "body")) return "Check the highlighted fields.";
+  return fallback;
 }
 
 function radiusText(branch: BranchRecord | null): string {

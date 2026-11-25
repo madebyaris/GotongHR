@@ -72,8 +72,8 @@ export async function registerIdentity(
       });
     }
     await scope.register(fastifyBetterAuth, { auth: options.auth });
+    await registerOrgRoutes(scope);
   });
-  await registerOrgRoutes(app);
 }
 
 function readStatusCode(error: unknown): number {

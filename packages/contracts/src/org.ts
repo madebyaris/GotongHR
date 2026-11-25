@@ -104,6 +104,7 @@ const UMP_MESSAGE = "UMP/UMK must be a whole number of rupiah.";
 const TIMEZONE_MESSAGE = "Choose a timezone: WIB, WITA, or WIT.";
 const MAX_INT8 = 9223372036854775807n;
 const MAX_RADIUS = 2_000_000_000;
+const BPJS_CHARACTERS = "BPJS company code may use only letters, digits, dots, and hyphens.";
 
 /** JSON has no bigint. Integer rupiah crosses the boundary as a decimal string. */
 export function idrToJson(value: bigint): string {
@@ -138,7 +139,7 @@ export function parseUmpIdr(input: unknown): ParseResult<bigint> {
     return finishUmp(BigInt(input));
   }
   if (typeof input === "string") {
-    const trimmed = input.trim().replace(/\s+/gu, "");
+    const trimmed = input.trim();
     const grouped = /^[1-9]\d{0,2}(?:\.\d{3})+$/u.test(trimmed);
     const plain = /^(?:0|[1-9]\d*)$/u.test(trimmed);
     if (!grouped && !plain) return { ok: false, message: UMP_MESSAGE };
@@ -295,21 +296,23 @@ export function parseBranchPatch(input: unknown): ParseObjectResult<BranchPatch>
     if (!umpUmkIdr.ok) fields.push({ field: "umpUmkIdr", message: umpUmkIdr.message });
     else value.umpUmkIdr = umpUmkIdr.value;
   }
-  const geofenceKeys = ["latitude", "longitude", "geofenceRadiusM"] as const;
-  const geofenceTouched = geofenceKeys.some((key) => hasOwn(body, key));
-  if (geofenceTouched) {
+  if (hasOwn(body, "latitude")) {
     changed = true;
-    const geofence = parseGeofence(
-      hasOwn(body, "latitude") ? body.latitude : null,
-      hasOwn(body, "longitude") ? body.longitude : null,
-      hasOwn(body, "geofenceRadiusM") ? body.geofenceRadiusM : null,
-    );
-    if (!geofence.ok) fields.push(...geofence.fields);
-    else {
-      value.latitude = geofence.value.latitude;
-      value.longitude = geofence.value.longitude;
-      value.geofenceRadiusM = geofence.value.geofenceRadiusM;
-    }
+    const latitude = parseOptionalCoord(body.latitude, -90, 90, "Latitude must be between -90 and 90.");
+    if (!latitude.ok) fields.push({ field: "latitude", message: latitude.message });
+    else value.latitude = latitude.value;
+  }
+  if (hasOwn(body, "longitude")) {
+    changed = true;
+    const longitude = parseOptionalCoord(body.longitude, -180, 180, "Longitude must be between -180 and 180.");
+    if (!longitude.ok) fields.push({ field: "longitude", message: longitude.message });
+    else value.longitude = longitude.value;
+  }
+  if (hasOwn(body, "geofenceRadiusM")) {
+    changed = true;
+    const radius = parseOptionalRadius(body.geofenceRadiusM);
+    if (!radius.ok) fields.push({ field: "geofenceRadiusM", message: radius.message });
+    else value.geofenceRadiusM = radius.value;
   }
   if (fields.length > 0) return { ok: false, fields };
   if (!changed) return { ok: false, fields: [{ field: "body", message: "No changes to save." }] };
@@ -345,13 +348,14 @@ function parseJkk(value: unknown): ParseResult<number | null> {
 function parseBpjs(value: unknown): ParseResult<string | null> {
   if (isBlank(value)) return { ok: true, value: null };
   if (typeof value !== "string") {
-    return { ok: false, message: "BPJS company code must be 32 characters or fewer." };
+    return { ok: false, message: BPJS_CHARACTERS };
   }
   const code = value.trim();
   if (code.length === 0) return { ok: true, value: null };
-  if (code.length > 32 || !/^[A-Za-z0-9.-]+$/u.test(code)) {
+  if (code.length > 32) {
     return { ok: false, message: "BPJS company code must be 32 characters or fewer." };
   }
+  if (!/^[A-Za-z0-9.-]+$/u.test(code)) return { ok: false, message: BPJS_CHARACTERS };
   return { ok: true, value: code };
 }
 
@@ -395,6 +399,25 @@ function parseGeofence(
     return { ok: false, fields };
   }
   return { ok: true, value: { latitude: lat, longitude: lng, geofenceRadiusM: radiusM }, fields: [] };
+}
+
+function parseOptionalCoord(
+  value: unknown,
+  min: number,
+  max: number,
+  message: string,
+): ParseResult<string | null> {
+  if (isBlank(value)) return { ok: true, value: null };
+  const parsed = parseCoord(value, min, max, message);
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: parsed.value };
+}
+
+function parseOptionalRadius(value: unknown): ParseResult<number | null> {
+  if (isBlank(value)) return { ok: true, value: null };
+  const parsed = parseRadius(value);
+  if (!parsed.ok) return parsed;
+  return { ok: true, value: parsed.value };
 }
 
 function parseCoord(value: unknown, min: number, max: number, message: string): ParseResult<string> {

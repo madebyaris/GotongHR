@@ -53,6 +53,9 @@ export async function signInWithEmail(email: string, password: string): Promise<
   if (response.status === 429) {
     throw new ApiRequestError(429, "rate_limited", "Too many attempts. Wait a minute.", []);
   }
+  if (response.status >= 500) {
+    throw new ApiRequestError(response.status, "server_error", "Sign-in failed. Try again.", []);
+  }
   if (!response.ok) {
     throw new ApiRequestError(response.status, "invalid_login", "Email or password is wrong.", []);
   }

@@ -112,7 +112,10 @@ export async function listLegalEntities(
       FROM id_legal_entities
       ORDER BY created_at, id
     `);
-    return result.rows.map(readLegalEntity).filter((entity) => entityVisible(auth, entity.id));
+    const owners = await branchScopeEntityIds(tx, auth);
+    return result.rows
+      .map(readLegalEntity)
+      .filter((entity) => entityVisible(auth, entity.id, owners));
   });
 }
 
@@ -121,7 +124,7 @@ export async function createLegalEntity(
   auth: GotongAuthContext,
   input: LegalEntityInput,
 ): Promise<LegalEntityRecord> {
-  if (auth.scopeEntityIds.length > 0) throw new OrgForbiddenError();
+  if (auth.scopeEntityIds.length > 0 || auth.scopeBranchIds.length > 0) throw new OrgForbiddenError();
   return appDb.withTenantContext(auth.tenantId, async (tx) => {
     try {
       const result = await tx.execute(sql`
@@ -152,9 +155,10 @@ export async function updateLegalEntity(
   id: string,
   patch: LegalEntityPatch,
 ): Promise<LegalEntityRecord> {
+  if (auth.scopeBranchIds.length > 0) throw new OrgForbiddenError();
   return appDb.withTenantContext(auth.tenantId, async (tx) => {
     const current = await findLegalEntity(tx, id);
-    if (!current || !entityVisible(auth, current.id)) throw new OrgNotFoundError();
+    if (!current || !entityVisible(auth, current.id, null)) throw new OrgNotFoundError();
     const next: LegalEntityInput = {
       companyName: patch.companyName ?? current.companyName,
       npwp16: patch.npwp16 ?? current.npwp16,
@@ -205,7 +209,7 @@ export async function createBranch(
   assertGeofence(input);
   return appDb.withTenantContext(auth.tenantId, async (tx) => {
     const entity = await findLegalEntity(tx, input.legalEntityId);
-    if (!entity || !entityVisible(auth, entity.id)) {
+    if (!entity || !entityVisible(auth, entity.id, null)) {
       throw new OrgFieldError([{ field: "legalEntityId", message: "Choose a legal entity." }]);
     }
     try {
@@ -259,8 +263,9 @@ export async function updateBranch(
     };
     assertGeofence(next);
     if (next.legalEntityId !== current.legalEntityId) {
+      const owners = await branchScopeEntityIds(tx, auth);
       const entity = await findLegalEntity(tx, next.legalEntityId);
-      if (!entity || !entityVisible(auth, entity.id)) {
+      if (!entity || !entityVisible(auth, entity.id, owners)) {
         throw new OrgFieldError([{ field: "legalEntityId", message: "Choose a legal entity." }]);
       }
     }
@@ -309,14 +314,42 @@ async function findBranch(tx: TenantTx, id: string): Promise<BranchRecord | null
   return row ? readBranch(row) : null;
 }
 
-function entityVisible(auth: GotongAuthContext, id: string): boolean {
-  return auth.scopeEntityIds.length === 0 || auth.scopeEntityIds.includes(id);
+/**
+ * A non-empty branch scope is not "see every legal entity".
+ * Those users only read entities that own one of their branches, and they cannot write an entity.
+ */
+function entityVisible(
+  auth: GotongAuthContext,
+  id: string,
+  branchOwnerIds: ReadonlySet<string> | null,
+): boolean {
+  if (auth.scopeEntityIds.length > 0 && !auth.scopeEntityIds.includes(id)) return false;
+  if (auth.scopeBranchIds.length === 0) return true;
+  return branchOwnerIds?.has(id) ?? false;
 }
 
 function branchVisible(auth: GotongAuthContext, branch: BranchRecord): boolean {
-  const entityOk = entityVisible(auth, branch.legalEntityId);
+  const entityOk = auth.scopeEntityIds.length === 0 || auth.scopeEntityIds.includes(branch.legalEntityId);
   const branchOk = auth.scopeBranchIds.length === 0 || auth.scopeBranchIds.includes(branch.id);
   return entityOk && branchOk;
+}
+
+async function branchScopeEntityIds(
+  tx: TenantTx,
+  auth: GotongAuthContext,
+): Promise<ReadonlySet<string> | null> {
+  if (auth.scopeBranchIds.length === 0) return null;
+  const result = await tx.execute(sql`SELECT id, legal_entity_id FROM id_branches`);
+  const allowed = new Set(auth.scopeBranchIds);
+  const owners = new Set<string>();
+  for (const row of result.rows) {
+    const record = asRecord(row);
+    if (!record) continue;
+    const id = requiredText(record, "id");
+    if (!allowed.has(id)) continue;
+    owners.add(requiredText(record, "legal_entity_id"));
+  }
+  return owners;
 }
 
 function assertGeofence(input: Pick<BranchInput, "latitude" | "longitude" | "geofenceRadiusM">): void {

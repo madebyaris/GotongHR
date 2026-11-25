@@ -5,7 +5,9 @@ import {
   canWriteOrg,
   idrToJson,
   parseBranchCreate,
+  parseBranchPatch,
   parseLegalEntityCreate,
+  parseLegalEntityPatch,
   parseNitku22,
   parseNpwp16,
   parseUmpIdr,
@@ -92,6 +94,11 @@ test("UMP is non-negative bigint rupiah, including values above the JSON safe in
   assert.equal(parseUmpIdr(-1).ok, false);
   assert.equal(parseUmpIdr("9223372036854775808").ok, false);
   assert.equal(parseUmpIdr(Number.MAX_SAFE_INTEGER + 2).ok, false);
+  assert.equal(parseUmpIdr("1 2").ok, false);
+  assert.equal(parseUmpIdr(" 5396761 ").ok, true);
+});
+
+test("a branch needs a 22-digit NITKU and a WIB, WITA, or WIT timezone", () => {
   const branch = parseBranchCreate({
     legalEntityId: "018f3a4c-7b2a-7c3d-8e4f-123456789abc",
     name: "Jakarta Pusat",
@@ -104,10 +111,43 @@ test("UMP is non-negative bigint rupiah, including values above the JSON safe in
     assert.equal(branch.fields.some((field) => field.field === "nitku22"), true);
     assert.equal(branch.fields.some((field) => field.field === "timezone"), true);
   }
+  const latitudeOnly = parseBranchPatch({ latitude: "-6.200000" });
+  assert.equal(latitudeOnly.ok, true);
+  if (latitudeOnly.ok) {
+    assert.equal(latitudeOnly.value.latitude, "-6.2");
+    assert.equal("longitude" in latitudeOnly.value, false);
+    assert.equal("geofenceRadiusM" in latitudeOnly.value, false);
+  }
+  const cleared = parseBranchPatch({ latitude: null, longitude: null, geofenceRadiusM: null });
+  assert.equal(cleared.ok, true);
+  if (cleared.ok) {
+    assert.equal(cleared.value.latitude, null);
+    assert.equal(cleared.value.longitude, null);
+    assert.equal(cleared.value.geofenceRadiusM, null);
+  }
+});
+
+test("only an owner or HR admin can change the company", () => {
   assert.equal(canWriteOrg("org_owner"), true);
   assert.equal(canWriteOrg("hr_admin"), true);
   assert.equal(canWriteOrg("payroll_admin"), false);
   assert.equal(canWriteOrg("employee"), false);
+});
+
+test("BPJS company code errors name the length and the character set separately", () => {
+  const long = parseLegalEntityPatch({ bpjsBuCode: "A".repeat(33) });
+  assert.equal(long.ok, false);
+  if (!long.ok) {
+    assert.equal(long.fields[0]?.message, "BPJS company code must be 32 characters or fewer.");
+  }
+  const symbols = parseLegalEntityPatch({ bpjsBuCode: "AB CD" });
+  assert.equal(symbols.ok, false);
+  if (!symbols.ok) {
+    assert.equal(
+      symbols.fields[0]?.message,
+      "BPJS company code may use only letters, digits, dots, and hyphens.",
+    );
+  }
 });
 
 test("idr accepts only bigint rupiah", () => {

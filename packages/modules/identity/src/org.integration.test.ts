@@ -17,6 +17,7 @@ import { createAuth, type GotongAuth } from "./auth.ts";
 import { bootstrapOwner, grantMembership } from "./bootstrap.ts";
 import { migrateIdentity } from "./migrate.ts";
 import { registerIdentity } from "./plugin.ts";
+import { cookieHeader, readErrorRecord, resetIdentity, setCookieLines, superuserQuery } from "./testing.ts";
 
 const { Client } = pg;
 
@@ -39,6 +40,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
   let appDb: TenantDatabase;
   let tenantId = "";
   let employeeAuthUserId = "";
+  let hrAuthUserId = "";
   let ownerCookie = "";
   let employeeCookie = "";
   let hrCookie = "";
@@ -84,13 +86,14 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       role: "employee",
     });
     employeeAuthUserId = employee.authUserId;
-    await grantMembership(auth, appDb, {
+    const hr = await grantMembership(auth, appDb, {
       tenantId,
       email: hrEmail,
       password,
       name: "HR Admin",
       role: "hr_admin",
     });
+    hrAuthUserId = hr.authUserId;
     await grantMembership(auth, appDb, {
       tenantId,
       email: payrollEmail,
@@ -113,7 +116,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
   it("returns the signed-in owner, tenant, role, and an empty company", async () => {
     const anon = await app.inject({ method: "GET", url: "/api/v1/me/context" });
     assert.equal(anon.statusCode, 401);
-    assert.equal(readError(anon)?.code, "unauthenticated");
+    assert.equal(readErrorRecord(anon)?.code, "unauthenticated");
     const response = await getJson("/api/v1/me/context", ownerCookie);
     assert.equal(response.statusCode, 200, response.body);
     const body = readData<ContextBody>(response);
@@ -137,7 +140,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
         npwp16: badNpwp,
       });
       assert.equal(response.statusCode, 400, response.body);
-      const error = readError(response);
+      const error = readErrorRecord(response);
       assert.equal(error?.code, "invalid_field");
       assert.equal(error?.fields?.some((field) => field.field === "npwp16"), true);
     }
@@ -150,7 +153,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
     for (const badNitku of ["123456789012345678901", "12345678901234567890123", "012345678901234567890A"]) {
       const response = await postJson("/api/v1/branches", ownerCookie, branchBody(entityId, badNitku));
       assert.equal(response.statusCode, 400, response.body);
-      const error = readError(response);
+      const error = readErrorRecord(response);
       assert.equal(error?.code, "invalid_field");
       assert.equal(error?.fields?.some((field) => field.field === "nitku22" && field.message.includes("22")), true);
     }
@@ -169,7 +172,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       umpUmkIdr: 5396761.5,
     });
     assert.equal(fractional.statusCode, 400, fractional.body);
-    assert.equal(readError(fractional)?.fields?.some((field) => field.field === "umpUmkIdr"), true);
+    assert.equal(readErrorRecord(fractional)?.fields?.some((field) => field.field === "umpUmkIdr"), true);
     const negative = await postJson("/api/v1/branches", ownerCookie, {
       ...branchBody(entityId, nitku),
       umpUmkIdr: -1,
@@ -196,6 +199,12 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
     assert.equal(readData<BranchBody>(patched).umpUmkIdr, hugeUmp);
     const listed = readData<BranchBody[]>(await getJson("/api/v1/branches", ownerCookie));
     assert.equal(listed.find((row) => row.id === branch.id)?.umpUmkIdr, hugeUmp);
+    const moved = await patchJson(`/api/v1/branches/${branch.id}`, ownerCookie, { latitude: "-6.200000" });
+    assert.equal(moved.statusCode, 200, moved.body);
+    const movedBranch = readData<BranchBody>(moved);
+    assert.equal(movedBranch.latitude, "-6.2");
+    assert.equal(movedBranch.longitude, "106.827153");
+    assert.equal(movedBranch.geofenceRadiusM, 150);
     const column = await appDb.pool.query<{ data_type: string }>(
       `SELECT data_type FROM information_schema.columns
        WHERE table_name = 'id_branches' AND column_name = 'ump_umk_idr'`,
@@ -231,7 +240,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       npwp16: npwp,
     });
     assert.equal(duplicateEntity.statusCode, 409, duplicateEntity.body);
-    assert.equal(readError(duplicateEntity)?.fields?.some((field) => field.field === "npwp16"), true);
+    assert.equal(readErrorRecord(duplicateEntity)?.fields?.some((field) => field.field === "npwp16"), true);
     const entities = readData<{ id: string }[]>(await getJson("/api/v1/legal-entities", ownerCookie));
     const entityId = entities[0]?.id;
     assert.ok(entityId);
@@ -241,7 +250,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       branchBody(entityId, nitku),
     );
     assert.equal(duplicateBranch.statusCode, 409, duplicateBranch.body);
-    assert.equal(readError(duplicateBranch)?.fields?.some((field) => field.field === "nitku22"), true);
+    assert.equal(readErrorRecord(duplicateBranch)?.fields?.some((field) => field.field === "nitku22"), true);
   });
 
   it("lets every member read and only an owner or HR admin write", async () => {
@@ -253,7 +262,7 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       npwp16: "7777777777777777",
     });
     assert.equal(employeeWrite.statusCode, 403, employeeWrite.body);
-    assert.equal(readError(employeeWrite)?.code, "forbidden");
+    assert.equal(readErrorRecord(employeeWrite)?.code, "forbidden");
     const payrollWrite = await postJson("/api/v1/branches", payrollCookie, {
       ...branchBody(readData<{ id: string }[]>(employeeRead)[0]?.id ?? "", "7777777777777777777777"),
     });
@@ -274,6 +283,55 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
       "UPDATE id_memberships SET scope_entity_ids = '{}'::uuid[] WHERE auth_user_id = $1",
       [employeeAuthUserId],
     );
+  });
+
+  it("limits a branch-scoped HR admin to the entity that owns the branch", async () => {
+    const entities = readData<{ id: string }[]>(await getJson("/api/v1/legal-entities", ownerCookie));
+    const branches = readData<{ id: string; legalEntityId: string }[]>(
+      await getJson("/api/v1/branches", ownerCookie),
+    );
+    const scopedBranch = branches[0];
+    assert.ok(scopedBranch);
+    const owned = entities.find((row) => row.id === scopedBranch.legalEntityId);
+    const other = entities.find((row) => row.id !== scopedBranch.legalEntityId);
+    assert.ok(owned);
+    assert.ok(other);
+    const otherBranch = await postJson(
+      "/api/v1/branches",
+      ownerCookie,
+      branchBody(other.id, "5555555555555555555555"),
+    );
+    assert.equal(otherBranch.statusCode, 201, otherBranch.body);
+    await superuserQuery(
+      "UPDATE id_memberships SET scope_entity_ids = '{}'::uuid[], scope_branch_ids = ARRAY[$1]::uuid[] WHERE auth_user_id = $2",
+      [scopedBranch.id, hrAuthUserId],
+    );
+    try {
+      const visibleEntities = readData<{ id: string }[]>(await getJson("/api/v1/legal-entities", hrCookie));
+      assert.deepEqual(visibleEntities.map((row) => row.id), [owned.id]);
+      const visibleBranches = readData<{ id: string }[]>(await getJson("/api/v1/branches", hrCookie));
+      assert.deepEqual(visibleBranches.map((row) => row.id), [scopedBranch.id]);
+      const context = readData<ContextBody>(await getJson("/api/v1/me/context", hrCookie));
+      assert.deepEqual(
+        context.legalEntities.map((row) => row.id),
+        [owned.id],
+      );
+      const patch = await patchJson(`/api/v1/legal-entities/${owned.id}`, hrCookie, {
+        companyName: "PT Scoped",
+      });
+      assert.equal(patch.statusCode, 403, patch.body);
+      assert.equal(readErrorRecord(patch)?.code, "forbidden");
+      const create = await postJson("/api/v1/legal-entities", hrCookie, {
+        companyName: "PT Extra",
+        npwp16: "2222222222222222",
+      });
+      assert.equal(create.statusCode, 403, create.body);
+    } finally {
+      await superuserQuery(
+        "UPDATE id_memberships SET scope_entity_ids = '{}'::uuid[], scope_branch_ids = '{}'::uuid[] WHERE auth_user_id = $1",
+        [hrAuthUserId],
+      );
+    }
   });
 
   it("isolates rows with FORCE RLS and allows DML only for app_tenant", async () => {
@@ -405,9 +463,13 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
 
     const platform = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_PLATFORM") });
     const queue = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_QUEUE") });
-    await platform.connect();
-    await queue.connect();
+    let platformOpen = false;
+    let queueOpen = false;
     try {
+      await platform.connect();
+      platformOpen = true;
+      await queue.connect();
+      queueOpen = true;
       await assert.rejects(platform.query("SELECT id FROM id_legal_entities"), (error: unknown) => {
         return errorCode(error) === "42501";
       });
@@ -415,8 +477,8 @@ describe("legal entities and branches", { concurrency: 1 }, () => {
         return errorCode(error) === "42501";
       });
     } finally {
-      await platform.end();
-      await queue.end();
+      if (platformOpen) await platform.end();
+      if (queueOpen) await queue.end();
     }
   });
 });
@@ -457,7 +519,7 @@ async function signedIn(email: string, userPassword: string): Promise<string> {
     password: userPassword,
   });
   assert.equal(response.statusCode, 200, response.body);
-  const cookie = cookieHeader(response);
+  const cookie = cookieHeader(setCookieLines(response));
   assert.ok(cookie.includes("="));
   return cookie;
 }
@@ -504,25 +566,6 @@ function readData<T>(response: LightMyRequestResponse): T {
   return parsed.data;
 }
 
-function readError(response: LightMyRequestResponse): {
-  code?: string;
-  fields?: { field: string; message: string }[];
-} | null {
-  const parsed = JSON.parse(response.body) as {
-    error: { code?: string; fields?: { field: string; message: string }[] } | null;
-  };
-  return parsed.error;
-}
-
-function cookieHeader(response: LightMyRequestResponse): string {
-  const raw = response.headers["set-cookie"];
-  const lines = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw.map(String) : [];
-  return lines
-    .map((line) => line.split(";")[0]?.trim() ?? "")
-    .filter((part) => part.includes("="))
-    .join("; ");
-}
-
 function assertUuidV7(id: string): void {
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu);
 }
@@ -534,43 +577,4 @@ function errorCode(error: unknown): string | undefined {
     current = "cause" in current ? current.cause : undefined;
   }
   return undefined;
-}
-
-async function superuserQuery<T extends pg.QueryResultRow>(text: string, values: unknown[]): Promise<T[]> {
-  const admin = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
-  await admin.connect();
-  try {
-    const result = await admin.query<T>(text, values);
-    return result.rows;
-  } finally {
-    await admin.end();
-  }
-}
-
-async function resetIdentity(): Promise<void> {
-  const admin = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
-  await admin.connect();
-  try {
-    await admin.query(`
-      TRUNCATE TABLE
-        id_branches,
-        id_legal_entities,
-        id_sessions,
-        id_memberships,
-        id_users,
-        id_roles,
-        id_tenants,
-        id_rate_limits,
-        ba_two_factor,
-        ba_invitation,
-        ba_member,
-        ba_session,
-        ba_account,
-        ba_verification,
-        ba_organization,
-        ba_user
-    `);
-  } finally {
-    await admin.end();
-  }
 }

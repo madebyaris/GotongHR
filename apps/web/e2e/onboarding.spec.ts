@@ -1,10 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import pg from "pg";
 
 /**
  * Signs in through Better Auth and saves one legal entity and one branch.
- * Run the API on port 3000 with BETTER_AUTH_URL set to the web origin, then:
+ * The API must already be on port 3000 with BETTER_AUTH_URL set to the web origin.
+ * Playwright starts Vite. The test truncates company rows first so a rerun starts empty.
  *   pnpm --filter @gotonghr/web test:e2e
  * Screenshots land in GOTONG_SCREENSHOT_DIR when that variable is set.
  */
@@ -12,6 +15,10 @@ import { expect, test, type Page } from "@playwright/test";
 const email = process.env.GOTONG_E2E_EMAIL ?? "owner@gotonghr.local";
 const password = process.env.GOTONG_E2E_PASSWORD ?? "change-me-owner-password";
 const shotDir = process.env.GOTONG_SCREENSHOT_DIR;
+
+test.beforeAll(async () => {
+  await resetCompany();
+});
 
 test("owner signs in, sees field errors, and keeps the company after reload", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -56,6 +63,22 @@ test("owner signs in, sees field errors, and keeps the company after reload", as
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, "slice-1-4-saved-phone.png");
 });
+
+async function resetCompany(): Promise<void> {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+  process.loadEnvFile(path.join(root, ".env"));
+  const connectionString = process.env.DATABASE_URL_SUPERUSER;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL_SUPERUSER is required to reset company setup.");
+  }
+  const client = new pg.Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query("TRUNCATE TABLE id_branches, id_legal_entities");
+  } finally {
+    await client.end();
+  }
+}
 
 async function signIn(page: Page): Promise<void> {
   await page.goto("/sign-in");
