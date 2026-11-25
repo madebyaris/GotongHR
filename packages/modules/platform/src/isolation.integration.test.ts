@@ -40,6 +40,7 @@ const deniedTables = [
   "hr_employee_pii",
   "hr_employees",
   "hr_secret",
+  "att_clock_events",
   "att_secret",
   "pay_run",
   "id_memberships",

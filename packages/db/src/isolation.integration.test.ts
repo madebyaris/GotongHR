@@ -26,6 +26,7 @@ const requiredTenantTables = [
   "ai_action_proposals",
   "ai_conversations",
   "ai_messages",
+  "att_clock_events",
   "att_secret",
   "aud_events",
   "aud_outbox_events",
@@ -52,6 +53,7 @@ const platformDeniedTables = [
   "hr_employee_pii",
   "hr_employees",
   "hr_secret",
+  "att_clock_events",
   "att_secret",
   "pay_run",
   "id_memberships",
@@ -214,6 +216,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "att_clock_events",
       "hr_employee_pii",
       "hr_employees",
       "ai_messages",
@@ -370,7 +373,7 @@ async function scopedOrDenied(
   }
 }
 
-/** Runs identity, platform, audit, and AI migrates without a package dependency from db. */
+/** Runs identity, platform, audit, core-hr, clock, and AI migrates without a package dependency from db. */
 async function applyTenantSchema(): Promise<void> {
   const script = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -523,6 +526,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const messageB = randomUUID();
   const proposalA = randomUUID();
   const proposalB = randomUUID();
+  const clockA = randomUUID();
+  const clockB = randomUUID();
+  const clockKeyA = randomUUID();
+  const clockKeyB = randomUUID();
   const emailA = `${tenantA}@isolation.test`;
   const emailB = `${tenantB}@isolation.test`;
 
@@ -637,6 +644,16 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       [employeeA, employeeB, tenantA, tenantB, entityA, entityB, branchA, branchB],
     );
     await superuser.query(
+      `INSERT INTO att_clock_events (
+         id, tenant_id, employee_id, branch_id, idempotency_key,
+         punch_type, captured_at, received_at, clock_drift_seconds,
+         sync_source, lat, lng, geofence_ok, review_status
+       ) VALUES
+         ($1, $3, $5, $7, $9, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok'),
+         ($2, $4, $6, $8, $10, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok')`,
+      [clockA, clockB, tenantA, tenantB, employeeA, employeeB, branchA, branchB, clockKeyA, clockKeyB],
+    );
+    await superuser.query(
       `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask) VALUES
          ($1, $3, $5, 'sealed-ciphertext-value-aaaa', $7, '3273********0001'),
          ($2, $4, $6, 'sealed-ciphertext-value-bbbb', $8, '3273********0001')`,
@@ -704,6 +721,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["ai_action_proposals", { a: proposalA, b: proposalB }],
       ["ai_conversations", { a: conversationA, b: conversationB }],
       ["ai_messages", { a: messageA, b: messageB }],
+      ["att_clock_events", { a: clockA, b: clockB }],
       ["att_secret", { a: attA, b: attB }],
       ["aud_events", { a: eventA, b: eventB }],
       ["aud_outbox_events", { a: outboxA, b: outboxB }],
@@ -737,6 +755,7 @@ async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   await superuser.query("DELETE FROM sys_platform_audit_events WHERE target_tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM sys_support_grants WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_clock_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_employee_pii WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_employees WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   for (const table of standIns) {

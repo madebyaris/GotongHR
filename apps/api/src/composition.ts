@@ -1,4 +1,5 @@
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
+import { registerClockRoutes } from "@gotonghr/attendance";
 import type { DomainActionExecutor } from "@gotonghr/contracts";
 import { registerCoreHr } from "@gotonghr/core-hr";
 import {
@@ -15,6 +16,7 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requireMember,
   requirePermission,
   type GotongAuth,
 } from "@gotonghr/identity";
@@ -103,6 +105,20 @@ export async function composeFromEnv(
           selfOnly: auth.selfOnly,
           ipAddress: request.ip || null,
           userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
+    });
+    await registerClockRoutes(app, {
+      database: appDb,
+      storage,
+      guard: requireMember(),
+      readCaller(request) {
+        const auth = request.gotongAuth;
+        if (!auth) return null;
+        return {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          scopeBranchIds: auth.scopeBranchIds,
         };
       },
     });
