@@ -44,7 +44,7 @@ import { verifyStatutoryPayload } from "./statutory-verifier.ts";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { registerTenantAi } from "./ai.ts";
-import { readConfig, type AppConfig } from "./config.ts";
+import { ownedPayrollPorts, readConfig, type AppConfig, type AppRole } from "./config.ts";
 import { platformReaders } from "./platform-auth.ts";
 import { buildServer } from "./server.ts";
 import { MAINTENANCE_QUEUE, startBoss } from "./queue.ts";
@@ -53,7 +53,13 @@ import { sendEmployeeImport, startEmployeeImportWorker } from "./employee-import
 import { createTenantExportRead } from "./tenant-export-adapters.ts";
 import { sendTenantExport, startTenantExportWorker } from "./tenant-export.ts";
 import { createPayrollAdapters } from "./payroll-adapters.ts";
-import { createPgBossPayrollQueue, startPayrollWorkers } from "./payroll-queue.ts";
+import { createPayrollQueue, startPayrollWorkers } from "./payroll-queue.ts";
+import {
+  createHttpPayrollPorts,
+  registerInternalPortRoutes,
+  type PayrollPortAdapters,
+} from "./ports/http.ts";
+import { attachSessionIdentity } from "./session-identity.ts";
 
 export interface ComposedApp {
   app: FastifyInstance;
@@ -105,20 +111,28 @@ export async function composeFromEnv(
       },
     });
     const auth = createAuth({ appDb, env });
-    await startEmployeeImportWorker(runningBoss, { appDb, storage });
+    const role = config.role;
+    if (runsJobs(role)) {
+      await startEmployeeImportWorker(runningBoss, { appDb, storage });
+    }
     const payrollStorage = {
       put: (input: { key: string; body: Uint8Array; contentType: string }) => storage.put(input),
       presignGet: (input: { key: string; expiresInSeconds: number }) =>
         storage.presignGet({ key: input.key, expiresInSeconds: input.expiresInSeconds }),
     };
-    await startPayrollWorkers(runningBoss, { appDb, storage: payrollStorage });
-    await startTenantExportWorker(runningBoss, {
-      appDb,
-      read: createTenantExportRead({ appDb, storage }),
-      storage,
-    });
+    if (runsJobs(role) && config.queueDriver === "pgboss") {
+      await startPayrollWorkers(runningBoss, { appDb, storage: payrollStorage });
+    }
+    if (runsJobs(role)) {
+      await startTenantExportWorker(runningBoss, {
+        appDb,
+        read: createTenantExportRead({ appDb, storage }),
+        storage,
+      });
+    }
     const payrollAdapters = createPayrollAdapters(appDb);
-    const payrollQueue = createPgBossPayrollQueue(runningBoss);
+    const payrollPorts = payrollPortsFor(config, payrollAdapters);
+    const payrollQueue = createPayrollQueue(config.queueDriver, runningBoss);
     const guard = (permission: PermissionAtom) => requirePermission(permission);
     const readAuth = (request: FastifyRequest) => {
       const session = request.gotongAuth;
@@ -137,136 +151,166 @@ export async function composeFromEnv(
         userAgent: typeof agent === "string" ? agent : null,
       };
     };
-    await registerIdentity(app, { auth, appDb, env });
-    await registerContractExpiryJob(boss, async (now) => {
-      await scanContractExpiry({
-        appDb,
-        queueUrl: requiredEnv(env, "DATABASE_URL_QUEUE"),
-        now,
-      });
-    });
-    await registerCoreHr(app, { appDb, guard, readAuth });
-    await registerEmployeeDocuments(app, { appDb, storage, guard, readAuth });
-    await registerEmployeeImports(app, {
-      appDb,
-      storage,
-      guard,
-      readAuth,
-      enqueueEmployeeImport: (message) => sendEmployeeImport(runningBoss, message),
-    });
-    await registerAttendanceRoutes(app, {
-      appDb,
-      adminGuard: requireOrgWriter(),
-      memberGuard: requireMember(),
-      readCaller(request) {
-        const current = request.gotongAuth;
-        if (!current) return null;
-        const agent = request.headers["user-agent"];
-        return {
-          tenantId: current.tenantId,
-          userId: current.userId,
-          role: current.role,
-          permissions: current.permissions,
-          ipAddress: request.ip || null,
-          userAgent: typeof agent === "string" ? agent : null,
-        };
-      },
-    });
-    await registerPayrollRoutes(app, {
-      appDb,
-      ...payrollAdapters,
-      queue: payrollQueue,
-      storage: payrollStorage,
-      createGuard: requirePermission("payroll.run.create"),
-      prepareGuard: requirePermission("payroll.run.prepare"),
-      finalizeGuard: requirePermission("payroll.run.finalize"),
-      exportGuard: requireAnyPermission(["payroll.run.prepare", "payroll.coretax.export"]),
-      memberGuard: requireMember(),
-      readCaller(request) {
-        const current = request.gotongAuth;
-        if (!current) return null;
-        const agent = request.headers["user-agent"];
-        return {
-          tenantId: current.tenantId,
-          userId: current.userId,
-          role: current.role,
-          permissions: current.permissions,
-          employeeId: null,
-          sessionTotpVerified: current.sessionTotpVerified,
-          ipAddress: request.ip || null,
-          userAgent: typeof agent === "string" ? agent : null,
-        };
-      },
-    });
-    await registerClockRoutes(app, {
-      database: appDb,
-      storage,
-      guard: requireMember(),
-      readCaller(request) {
-        const auth = request.gotongAuth;
-        if (!auth) return null;
-        return {
-          tenantId: auth.tenantId,
-          userId: auth.userId,
-          scopeBranchIds: auth.scopeBranchIds,
-        };
-      },
-    });
-    await registerMobileRoutes(app, {
-      database: appDb,
-      guard: requireMember(),
-      readCaller(request) {
-        const auth = request.gotongAuth;
-        if (!auth) return null;
-        return { tenantId: auth.tenantId, userId: auth.userId };
-      },
-    });
-    await registerAnomalyRoutes(app, {
-      database: appDb,
-      guard: requirePermission("attendance.approve"),
-      readCaller(request) {
-        const current = request.gotongAuth;
-        if (!current) return null;
-        const agent = request.headers["user-agent"];
-        return {
-          tenantId: current.tenantId,
-          userId: current.userId,
-          role: current.role,
-          permissions: current.permissions,
-          scopeBranchIds: current.scopeBranchIds,
-          ipAddress: request.ip || null,
-          userAgent: typeof agent === "string" ? agent : null,
-        };
-      },
-    });
-    await registerTenantAi(app, {
-      database: appDb,
-      env,
-      ...(options.aiDomain ? { domain: options.aiDomain } : {}),
-      ...(options.aiProvider ? { provider: options.aiProvider } : {}),
-      ...(options.aiLoadTable ? { loadTable: options.aiLoadTable } : {}),
-    });
-    const readers = platformReaders({ auth, platform: platformDb });
-    await registerPlatform(app, {
-      platform: platformDb,
-      app: appDb,
-      tenantAudit: createSupportGrantAuditPort(appDb),
-      mountPlatformRoutes: platformApiMounted(config.deploymentMode),
-      inviteSecret: readAuthSecret(env),
-      hashOwnerPassword: hashPassword,
-      readPlatformActor: readers.readPlatformActor,
-      readTenantAdmin: readers.readTenantAdmin,
-      readTenantOwner: readers.readTenantOwner,
-      enqueueTenantExport: (message) => sendTenantExport(runningBoss, message),
-      presignExportDownload: async (input) => {
-        const signed = await storage.presignGet({
-          key: input.key,
-          expiresInSeconds: input.expiresInSeconds,
+    if (role === "monolith") {
+      await registerIdentity(app, { auth, appDb, env });
+    } else if (role === "attendance") {
+      await registerIdentity(app, { auth, appDb, env, orgRoutes: false });
+    } else {
+      attachSessionIdentity(app, { auth, appDb });
+    }
+    if (runsJobs(role)) {
+      await registerContractExpiryJob(boss, async (now) => {
+        await scanContractExpiry({
+          appDb,
+          queueUrl: requiredEnv(env, "DATABASE_URL_QUEUE"),
+          now,
         });
-        return { url: signed.url };
-      },
-      verifyStatutoryPayload,
-    });
+      });
+    }
+    if (role === "monolith") {
+      await registerCoreHr(app, { appDb, guard, readAuth });
+      await registerEmployeeDocuments(app, { appDb, storage, guard, readAuth });
+      await registerEmployeeImports(app, {
+        appDb,
+        storage,
+        guard,
+        readAuth,
+        enqueueEmployeeImport: (message) => sendEmployeeImport(runningBoss, message),
+      });
+    }
+    if (servesAttendance(role)) {
+      await registerAttendanceRoutes(app, {
+        appDb,
+        adminGuard: requireOrgWriter(),
+        memberGuard: requireMember(),
+        readCaller(request) {
+          const current = request.gotongAuth;
+          if (!current) return null;
+          const agent = request.headers["user-agent"];
+          return {
+            tenantId: current.tenantId,
+            userId: current.userId,
+            role: current.role,
+            permissions: current.permissions,
+            ipAddress: request.ip || null,
+            userAgent: typeof agent === "string" ? agent : null,
+          };
+        },
+      });
+    }
+    if (servesPayroll(role)) {
+      await registerPayrollRoutes(app, {
+        appDb,
+        ...payrollPorts,
+        queue: payrollQueue,
+        storage: payrollStorage,
+        createGuard: requirePermission("payroll.run.create"),
+        prepareGuard: requirePermission("payroll.run.prepare"),
+        finalizeGuard: requirePermission("payroll.run.finalize"),
+        exportGuard: requireAnyPermission(["payroll.run.prepare", "payroll.coretax.export"]),
+        memberGuard: requireMember(),
+        readCaller(request) {
+          const current = request.gotongAuth;
+          if (!current) return null;
+          const agent = request.headers["user-agent"];
+          return {
+            tenantId: current.tenantId,
+            userId: current.userId,
+            role: current.role,
+            permissions: current.permissions,
+            employeeId: null,
+            sessionTotpVerified: current.sessionTotpVerified,
+            ipAddress: request.ip || null,
+            userAgent: typeof agent === "string" ? agent : null,
+          };
+        },
+      });
+    }
+    if (servesAttendance(role)) {
+      await registerClockRoutes(app, {
+        database: appDb,
+        storage,
+        guard: requireMember(),
+        readCaller(request) {
+          const auth = request.gotongAuth;
+          if (!auth) return null;
+          return {
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            scopeBranchIds: auth.scopeBranchIds,
+          };
+        },
+      });
+      await registerMobileRoutes(app, {
+        database: appDb,
+        guard: requireMember(),
+        readCaller(request) {
+          const auth = request.gotongAuth;
+          if (!auth) return null;
+          return { tenantId: auth.tenantId, userId: auth.userId };
+        },
+      });
+      await registerAnomalyRoutes(app, {
+        database: appDb,
+        guard: requirePermission("attendance.approve"),
+        readCaller(request) {
+          const current = request.gotongAuth;
+          if (!current) return null;
+          const agent = request.headers["user-agent"];
+          return {
+            tenantId: current.tenantId,
+            userId: current.userId,
+            role: current.role,
+            permissions: current.permissions,
+            scopeBranchIds: current.scopeBranchIds,
+            ipAddress: request.ip || null,
+            userAgent: typeof agent === "string" ? agent : null,
+          };
+        },
+      });
+    }
+    if (servesAi(role)) {
+      await registerTenantAi(app, {
+        database: appDb,
+        env,
+        ...(options.aiDomain ? { domain: options.aiDomain } : {}),
+        ...(options.aiProvider ? { provider: options.aiProvider } : {}),
+        ...(options.aiLoadTable ? { loadTable: options.aiLoadTable } : {}),
+      });
+    }
+    if (role === "monolith") {
+      const readers = platformReaders({ auth, platform: platformDb });
+      await registerPlatform(app, {
+        platform: platformDb,
+        app: appDb,
+        tenantAudit: createSupportGrantAuditPort(appDb),
+        mountPlatformRoutes: platformApiMounted(config.deploymentMode),
+        inviteSecret: readAuthSecret(env),
+        hashOwnerPassword: hashPassword,
+        readPlatformActor: readers.readPlatformActor,
+        readTenantAdmin: readers.readTenantAdmin,
+        readTenantOwner: readers.readTenantOwner,
+        enqueueTenantExport: (message) => sendTenantExport(runningBoss, message),
+        presignExportDownload: async (input) => {
+          const signed = await storage.presignGet({
+            key: input.key,
+            expiresInSeconds: input.expiresInSeconds,
+          });
+          return { url: signed.url };
+        },
+        verifyStatutoryPayload,
+      });
+    }
+    if (config.portTransport === "http" && config.internalSecret) {
+      const owned = ownedPayrollPorts(role);
+      if (owned.length > 0) {
+        await registerInternalPortRoutes(app, {
+          secret: config.internalSecret,
+          ports: owned,
+          adapters: payrollAdapters,
+        });
+      }
+    }
     const runningApp = app;
 
     return {
@@ -312,4 +356,28 @@ export async function composeFromEnv(
     await platformDb.end().catch(() => undefined);
     throw error;
   }
+}
+
+function runsJobs(role: AppRole): boolean {
+  return role === "monolith" || role === "worker";
+}
+
+function servesAttendance(role: AppRole): boolean {
+  return role === "monolith" || role === "attendance";
+}
+
+function servesPayroll(role: AppRole): boolean {
+  return role === "monolith" || role === "worker";
+}
+
+function servesAi(role: AppRole): boolean {
+  return role === "monolith" || role === "ai";
+}
+
+function payrollPortsFor(config: AppConfig, adapters: PayrollPortAdapters): PayrollPortAdapters {
+  if (config.portTransport !== "http" || !servesPayroll(config.role)) return adapters;
+  if (!config.internalSecret || !config.portUrls) {
+    throw new Error("HTTP payroll ports are not configured.");
+  }
+  return createHttpPayrollPorts({ secret: config.internalSecret, urls: config.portUrls });
 }

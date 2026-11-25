@@ -1,3 +1,3 @@
-import { logIdleRole } from "../idle-role.ts";
+import { bootRole } from "./listen.ts";
 
-logIdleRole("attendance");
+bootRole();

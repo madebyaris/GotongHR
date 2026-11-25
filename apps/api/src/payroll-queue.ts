@@ -10,8 +10,22 @@ import {
 } from "@gotonghr/payroll";
 import type { TenantDatabase } from "@gotonghr/db";
 import type { Job, PgBoss } from "pg-boss";
+import { createMemorySqsClient, createSqsPayrollQueue } from "./queue/sqs.ts";
 
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * `pgboss` is the default. `sqs` uses the in-memory client and does not call AWS.
+ */
+export function createPayrollQueue(driver: "pgboss" | "sqs", boss: PgBoss): PayrollQueuePort {
+  if (driver === "sqs") {
+    process.stderr.write(
+      `${JSON.stringify({ msg: "QUEUE_DRIVER=sqs uses the in-memory client", liveAws: false })}\n`,
+    );
+    return createSqsPayrollQueue(createMemorySqsClient());
+  }
+  return createPgBossPayrollQueue(boss);
+}
 
 export function createPgBossPayrollQueue(boss: PgBoss): PayrollQueuePort {
   return {
