@@ -226,6 +226,19 @@ export async function rejectPending(
   return rows.length === 1;
 }
 
+export async function latestConversationId(tx: TenantTx, userId: string): Promise<string | null> {
+  const rows = rowsOf<{ id: string }>(
+    await tx.execute(sql`
+      SELECT id::text AS id
+      FROM ai_conversations
+      WHERE created_by_user_id = ${userId}::uuid
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1
+    `),
+  );
+  return rows[0]?.id ?? null;
+}
+
 export async function listOwnProposals(tx: TenantTx, userId: string): Promise<ProposalRow[]> {
   return rowsOf<ProposalRow>(
     await tx.execute(sql`

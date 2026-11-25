@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseStatutoryTable } from "@gotonghr/payroll-engine";
 import { id2026DraftTable } from "@gotonghr/payroll-engine/draft";
 import type { AiCaller } from "./caller.ts";
-import { dispatchTool, simulatePayrollItem, toolsForCaller } from "./tools.ts";
+import { dispatchTool, proposalRequiresTotp, simulatePayrollItem, toolsForCaller } from "./tools.ts";
 
 const employeeId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -101,4 +101,29 @@ test("an employee cannot see privileged tools or another salary", () => {
     ok: false,
     code: "forbidden",
   });
+  const owner = caller({
+    role: "org_owner",
+    permissions: ["payroll.run.finalize", "ai.action.approve"],
+    selfOnly: false,
+  });
+  assert.equal(toolsForCaller(owner).some((tool) => tool.name === "propose_payroll_finalize"), true);
+  assert.equal(proposalRequiresTotp("propose_payroll_finalize"), true);
+  assert.equal(proposalRequiresTotp("propose_employee_change"), false);
+  const payroll = dispatchTool(
+    owner,
+    "propose_payroll_finalize",
+    {
+      payrollRunId: "55555555-5555-4555-8555-555555555555",
+      periodLabel: "2026-01",
+      netPayIdr: "15000000",
+    },
+    syntheticTable(),
+  );
+  assert.equal(payroll.ok, true);
+  if (!payroll.ok || !payroll.mutating) return;
+  assert.equal(payroll.impact.requiresTotp, true);
+  const amounts = payroll.impact.amounts as Array<{ unit: string; amount: string }>;
+  assert.equal(amounts[0]?.unit, "idr");
+  assert.equal(amounts[0]?.amount, "15000000");
+  assert.equal(dispatchTool(hr, "propose_payroll_finalize", { payrollRunId: "x" }, syntheticTable()).ok, false);
 });

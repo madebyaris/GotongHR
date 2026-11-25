@@ -11,8 +11,9 @@ import type { StatutoryTable } from "@gotonghr/payroll-engine";
 import { sql } from "drizzle-orm";
 import type { AiCaller, RequestMeta } from "./caller.ts";
 import { createConfirmationNonce, nonceMatches } from "./nonce.ts";
-import type { FakeStep, LlmMessage, LlmProvider, LlmToolCall } from "./provider.ts";
-import { RedactionSession } from "./redact.ts";
+import type { FakeStep, LlmCompletion, LlmMessage, LlmProvider, LlmToolCall, LlmToolDefinition } from "./provider.ts";
+import { createStreamGate, RedactionSession, scrubSecrets } from "./redact.ts";
+import { defaultFakeSteps } from "./script.ts";
 import {
   asJsonRecord,
   claimProposal,
@@ -21,6 +22,7 @@ import {
   insertMessage,
   insertProposal,
   iso,
+  latestConversationId,
   listMessages,
   listOwnProposals,
   lockProposal,
@@ -30,7 +32,7 @@ import {
   touchConversation,
   type ProposalRow,
 } from "./store.ts";
-import { dispatchTool, isMutatingTool, toolsForCaller } from "./tools.ts";
+import { dispatchTool, isMutatingTool, proposalRequiresTotp, toolsForCaller } from "./tools.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_MESSAGE = 8_000;
@@ -56,7 +58,32 @@ export interface ProposalView {
   arguments: unknown;
   executedAt: string | null;
   executionResult: unknown;
+  requiresTotp: boolean;
   confirmationNonce?: string;
+}
+
+export interface ThreadMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ConversationThread {
+  conversationId: string | null;
+  messages: ThreadMessage[];
+  proposals: ProposalView[];
+}
+
+export type ChatStreamEvent =
+  | { type: "token"; text: string }
+  | { type: "tool"; name: string; result: unknown }
+  | { type: "proposal"; proposal: ProposalView }
+  | { type: "done"; conversationId: string; message: string }
+  | { type: "error"; code: string; message: string };
+
+interface ChatOptions {
+  stream: boolean;
+  signal?: AbortSignal;
+  emit?: (event: ChatStreamEvent) => void;
 }
 
 export interface ChatResult {
@@ -99,6 +126,13 @@ export interface AiRuntime {
     proposalId: string,
     meta: RequestMeta,
   ): Promise<{ ok: true; data: ProposalView } | AiFailure>;
+  chatStream(
+    caller: AiCaller,
+    input: { message: string; conversationId?: string; script?: FakeStep[] },
+    meta: RequestMeta,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamEvent>;
+  readLatest(caller: AiCaller): Promise<{ ok: true; data: ConversationThread } | AiFailure>;
 }
 
 export function draftStatutoryTable(): StatutoryTable {
@@ -125,7 +159,7 @@ export function createAiRuntime(deps: AiRuntimeDeps): AiRuntime {
     listProposals(caller) {
       return deps.database.withTenantContext(caller.tenantId, async (tx) => ({
         ok: true as const,
-        data: (await listOwnProposals(tx, caller.userId)).map((row) => presentProposal(row, sessionFor, caller, null)),
+        data: (await listOwnProposals(tx, caller.userId)).map((row) => presentProposal(row, sessionFor, caller, null, true)),
       }));
     },
     getProposal(caller, proposalId) {
@@ -135,7 +169,7 @@ export function createAiRuntime(deps: AiRuntimeDeps): AiRuntime {
         if (!row || row.created_by_user_id !== caller.userId) {
           return failure(404, "not_found", "Proposal not found.");
         }
-        return { ok: true as const, data: presentProposal(row, sessionFor, caller, null) };
+        return { ok: true as const, data: presentProposal(row, sessionFor, caller, null, true) };
       });
     },
     confirmProposal(caller, proposalId, nonce, meta) {
@@ -143,6 +177,12 @@ export function createAiRuntime(deps: AiRuntimeDeps): AiRuntime {
     },
     rejectProposal(caller, proposalId, meta) {
       return reject(deps, sessionFor, caller, proposalId, meta);
+    },
+    chatStream(caller, input, meta, signal) {
+      return chatEvents(deps, loadTable, sessionFor, log, caller, input, meta, signal);
+    },
+    readLatest(caller) {
+      return readLatest(deps, sessionFor, caller);
     },
   };
 }
@@ -155,6 +195,7 @@ async function chat(
   caller: AiCaller,
   input: { message: string; conversationId?: string; script?: FakeStep[] },
   meta: RequestMeta,
+  options: ChatOptions = { stream: false },
 ): Promise<{ ok: true; data: ChatResult } | AiFailure> {
   const message = input.message.trim();
   if (message.length === 0 || message.length > MAX_MESSAGE) {
@@ -199,7 +240,7 @@ async function chat(
 
   if (deps.provider.name === "fake" && "useScript" in deps.provider) {
     const scripted = deps.provider as { useScript(steps: readonly FakeStep[]): void };
-    scripted.useScript(input.script?.slice(0, 4) ?? []);
+    scripted.useScript(input.script?.slice(0, 4) ?? defaultFakeSteps(message));
   }
 
   const tools = toolsForCaller(caller);
@@ -212,15 +253,22 @@ async function chat(
 
   const proposals: ProposalView[] = [];
   const toolResults: Array<{ name: string; result: unknown }> = [];
-  let completion = await deps.provider.complete({ messages, tools });
+  let completion = await readTurn(deps, session, { messages, tools }, options);
   for (let round = 0; round < MAX_ROUNDS && completion.toolCalls.length > 0; round += 1) {
     const assistantContent = session.redact(completion.text);
     const storedCalls: Array<{ id: string; name: string; arguments: unknown }> = [];
     const followUps: Array<{ callId: string; content: string }> = [];
     for (const call of completion.toolCalls) {
+      throwIfAborted(options.signal);
       const handled = await handleTool(deps, loadTable, session, caller, conversationId, call, meta);
       if (handled.proposal) proposals.push(handled.proposal);
       toolResults.push({ name: call.name, result: handled.publicResult });
+      options.emit?.({
+        type: "tool",
+        name: call.name,
+        result: scrubSecrets(handled.publicResult),
+      });
+      if (handled.proposal) options.emit?.({ type: "proposal", proposal: cardProposal(handled.proposal) });
       storedCalls.push({
         id: call.id,
         name: call.name,
@@ -254,7 +302,7 @@ async function chat(
     for (const followUp of followUps) {
       messages.push({ role: "tool", content: followUp.content, toolCallId: followUp.callId });
     }
-    completion = await deps.provider.complete({ messages, tools });
+    completion = await readTurn(deps, session, { messages, tools }, options);
   }
 
   const assistantText = session.redact(completion.text);
@@ -268,19 +316,24 @@ async function chat(
     });
     await touchConversation(tx, conversationId);
   });
+  const reveal = !options.stream && canReadPii(caller);
   return {
     ok: true,
     data: {
       conversationId,
-      message: canReadPii(caller) ? session.restore(assistantText) : assistantText,
+      message: reveal ? session.restore(assistantText) : assistantText,
       proposals: proposals.map((proposal) =>
-        canReadPii(caller)
-          ? { ...proposal, impactPreview: session.restoreValue(proposal.impactPreview), arguments: session.restoreValue(proposal.arguments) }
+        reveal
+          ? {
+              ...proposal,
+              impactPreview: session.restoreValue(proposal.impactPreview),
+              arguments: session.restoreValue(proposal.arguments),
+            }
           : proposal,
       ),
       toolResults: toolResults.map((item) => ({
         name: item.name,
-        result: canReadPii(caller) ? session.restoreValue(item.result) : item.result,
+        result: reveal ? session.restoreValue(item.result) : item.result,
       })),
     },
   };
@@ -356,6 +409,7 @@ async function handleTool(
     arguments: argumentsJson,
     executedAt: null,
     executionResult: null,
+    requiresTotp: proposalRequiresTotp(call.name),
     confirmationNonce: secret.nonce,
   };
   return {
@@ -392,6 +446,9 @@ async function confirm(
       if (!isMutatingTool(row.tool_name) || !toolStillAllowed(caller, row.tool_name, asJsonRecord(row.arguments_json))) {
         return failure(403, "forbidden", "Missing permission.");
       }
+      if (proposalRequiresTotp(row.tool_name) && !caller.sessionTotpVerified) {
+        return failure(403, "totp_verification_required", "Confirm this sign-in with an authenticator code.");
+      }
       if (await markExpired(tx, proposalId)) {
         return failure(409, "expired", "This proposal has expired.");
       }
@@ -415,7 +472,7 @@ async function confirm(
       });
       const next = await lockProposal(tx, proposalId);
       if (!next) return failure(404, "not_found", "Proposal not found.");
-      return { ok: true as const, data: presentProposal(next, sessionFor, caller, null) };
+      return { ok: true as const, data: presentProposal(next, sessionFor, caller, null, true) };
     });
 }
 
@@ -445,15 +502,13 @@ async function reject(
     });
     const next = await lockProposal(tx, proposalId);
     if (!next) return failure(404, "not_found", "Proposal not found.");
-    return { ok: true as const, data: presentProposal(next, sessionFor, caller, null) };
+    return { ok: true as const, data: presentProposal(next, sessionFor, caller, null, true) };
   });
 }
 
 function toolStillAllowed(caller: AiCaller, toolName: string, args: unknown): boolean {
-  if (toolName === "propose_employee_change") {
-    return dispatchTool(caller, toolName, args, id2026DraftTable).ok;
-  }
-  return false;
+  if (!isMutatingTool(toolName)) return false;
+  return dispatchTool(caller, toolName, args, id2026DraftTable).ok;
 }
 
 function presentProposal(
@@ -461,12 +516,13 @@ function presentProposal(
   sessionFor: (conversationId: string) => RedactionSession,
   caller: AiCaller,
   nonce: string | null,
+  revealPii: boolean,
 ): ProposalView {
   const session = row.conversation_id ? sessionFor(row.conversation_id) : null;
   const impact = asJsonRecord(row.impact_preview_json);
   const args = asJsonRecord(row.arguments_json);
   const result = row.execution_result_json === null ? null : asJsonRecord(row.execution_result_json);
-  const reveal = canReadPii(caller) ? session : null;
+  const reveal = revealPii && canReadPii(caller) ? session : null;
   const view: ProposalView = {
     id: row.id,
     conversationId: row.conversation_id,
@@ -477,6 +533,7 @@ function presentProposal(
     arguments: reveal ? reveal.restoreValue(args) : args,
     executedAt: row.executed_at ? iso(row.executed_at) : null,
     executionResult: reveal && result ? reveal.restoreValue(result) : result,
+    requiresTotp: proposalRequiresTotp(row.tool_name),
   };
   if (nonce) view.confirmationNonce = nonce;
   return view;
@@ -536,4 +593,157 @@ async function appendAudit(
 
 function failure(status: AiFailure["status"], code: string, message: string): AiFailure {
   return { ok: false, status, code, message };
+}
+
+class ChatAborted extends Error {
+  constructor() {
+    super("aborted");
+    this.name = "ChatAborted";
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new ChatAborted();
+}
+
+async function readTurn(
+  deps: AiRuntimeDeps,
+  session: RedactionSession,
+  request: { messages: LlmMessage[]; tools: LlmToolDefinition[] },
+  options: ChatOptions,
+): Promise<LlmCompletion> {
+  throwIfAborted(options.signal);
+  if (!options.stream) return deps.provider.complete(request);
+  let text = "";
+  const toolCalls: LlmToolCall[] = [];
+  const gate = createStreamGate();
+  for await (const event of deps.provider.stream(request, options.signal)) {
+    throwIfAborted(options.signal);
+    if (event.type === "text") {
+      text += event.text;
+      emitReady(session, gate.push(event.text), options);
+    } else if (event.type === "tool_call") {
+      emitReady(session, gate.flush(), options);
+      toolCalls.push(event.toolCall);
+    }
+  }
+  emitReady(session, gate.flush(), options);
+  return { text, toolCalls };
+}
+
+function emitReady(session: RedactionSession, chunk: string, options: ChatOptions): void {
+  if (!chunk || !options.emit) return;
+  const redacted = session.redact(chunk);
+  for (const piece of redacted.split(/(\s+)/u)) {
+    if (piece.length > 0) options.emit({ type: "token", text: piece });
+  }
+}
+
+function cardProposal(proposal: ProposalView): ProposalView {
+  const nonce = proposal.confirmationNonce;
+  const scrubbed = scrubSecrets({ ...proposal, confirmationNonce: undefined }) as ProposalView;
+  delete scrubbed.confirmationNonce;
+  if (nonce) scrubbed.confirmationNonce = nonce;
+  return scrubbed;
+}
+
+async function* chatEvents(
+  deps: AiRuntimeDeps,
+  loadTable: () => StatutoryTable,
+  sessionFor: (conversationId: string) => RedactionSession,
+  log: (event: AiLogEvent) => void,
+  caller: AiCaller,
+  input: { message: string; conversationId?: string; script?: FakeStep[] },
+  meta: RequestMeta,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<ChatStreamEvent> {
+  const queue = new AsyncQueue<ChatStreamEvent>();
+  const task = chat(deps, loadTable, sessionFor, log, caller, input, meta, {
+    stream: true,
+    ...(signal ? { signal } : {}),
+    emit: (event) => queue.push(event),
+  })
+    .then((result) => {
+      if (!result.ok) {
+        queue.push({ type: "error", code: result.code, message: result.message });
+        return;
+      }
+      queue.push({
+        type: "done",
+        conversationId: result.data.conversationId,
+        message: result.data.message,
+      });
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ChatAborted) return;
+      queue.push({ type: "error", code: "internal_error", message: "Request failed." });
+    })
+    .finally(() => queue.close());
+
+  for await (const event of queue) yield event;
+  await task;
+}
+
+async function readLatest(
+  deps: AiRuntimeDeps,
+  sessionFor: (conversationId: string) => RedactionSession,
+  caller: AiCaller,
+): Promise<{ ok: true; data: ConversationThread } | AiFailure> {
+  return deps.database.withTenantContext(caller.tenantId, async (tx) => {
+    const conversationId = await latestConversationId(tx, caller.userId);
+    if (!conversationId) {
+      return { ok: true as const, data: { conversationId: null, messages: [], proposals: [] } };
+    }
+    const rows = await listMessages(tx, conversationId);
+    const messages: ThreadMessage[] = [];
+    for (const row of rows) {
+      if (row.role !== "user" && row.role !== "assistant") continue;
+      if (row.role === "assistant" && row.content_redacted.trim().length === 0) continue;
+      messages.push({ role: row.role, content: row.content_redacted });
+    }
+    const proposals = (await listOwnProposals(tx, caller.userId))
+      .filter((row) => row.conversation_id === conversationId)
+      .map((row) => cardProposal(presentProposal(row, sessionFor, caller, null, false)));
+    return { ok: true as const, data: { conversationId, messages, proposals } };
+  });
+}
+
+class AsyncQueue<T> {
+  private readonly items: T[] = [];
+  private readonly waiters: Array<(value: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(item: T): void {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter({ value: item, done: false });
+      return;
+    }
+    this.items.push(item);
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    const waiting = this.waiters.splice(0);
+    for (const waiter of waiting) waiter({ value: undefined as T, done: true });
+  }
+
+  private next(): Promise<IteratorResult<T>> {
+    const item = this.items.shift();
+    if (item !== undefined) return Promise.resolve({ value: item, done: false });
+    if (this.closed) return Promise.resolve({ value: undefined as T, done: true });
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  async *[Symbol.asyncIterator](): AsyncGenerator<T> {
+    for (;;) {
+      const step = await this.next();
+      if (step.done) return;
+      yield step.value;
+    }
+  }
 }
