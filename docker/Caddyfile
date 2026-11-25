@@ -13,6 +13,31 @@
 		respond 404
 	}
 
+	handle /_redirects {
+		respond 404
+	}
+
+	handle /ess {
+		redir /ess/ 308
+	}
+
+	handle /ess/ {
+		root * /srv
+		rewrite * /ess/index.html
+		try_files {path}
+		file_server {
+			precompressed br gzip
+		}
+	}
+
+	handle /ess/* {
+		root * /srv
+		try_files {path} /ess/index.html
+		file_server {
+			precompressed br gzip
+		}
+	}
+
 	# Keep the /api prefix for /api/v1/* and /api/auth/*.
 	# handle_path would strip /api and those routes would miss.
 	# Fastify serves readiness at /readyz, so only that path is rewritten.

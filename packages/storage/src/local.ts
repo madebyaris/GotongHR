@@ -16,7 +16,7 @@ import { MAX_UPLOAD_BYTES, type ObjectStorage, type PresignPutInput } from "./ty
 export interface LocalStorageOptions {
   rootDir: string;
   secret: string;
-  /** Public prefix in front of the route. Caddy strips `/api`. */
+  /** Public prefix in front of the route. The default `/api` matches the proxy. */
   urlPrefix?: string;
 }
 
@@ -190,39 +190,40 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
           },
         );
 
-        scope.put(
-          "/storage/local/objects",
-          { bodyLimit: MAX_UPLOAD_BYTES },
-          async (request, reply) => {
-            let claims: ObjectToken;
-            try {
-              claims = claimsFromQuery(request.query, secret, "PUT");
-            } catch (error) {
-              return envelope(reply, 403, "forbidden", error instanceof Error ? error.message : "forbidden");
-            }
-            const body = request.body;
-            if (!Buffer.isBuffer(body)) {
-              return envelope(reply, 400, "empty_body", "Upload body is missing.");
-            }
-            if (body.length > claims.maxBytes) {
-              return envelope(reply, 413, "too_large", `Upload exceeds ${claims.maxBytes} bytes.`);
-            }
-            const destination = resolveObjectPath(rootDir, claims.key);
-            const staging = await ensureStagingDirectory(rootDir);
-            const temporary = path.join(staging, `${randomBytes(16).toString("hex")}.partial`);
-            await mkdir(path.dirname(destination), { recursive: true });
-            try {
-              await writeFile(temporary, body);
-              await rename(temporary, destination);
-            } catch (error) {
-              await rm(temporary, { force: true });
-              throw error;
-            }
-            return { data: { key: claims.key }, meta: null, error: null };
-          },
-        );
-
-        scope.get("/storage/local/objects", async (request, reply) => {
+        const putObject = async (
+          request: { query: unknown; body: unknown },
+          reply: Parameters<typeof envelope>[0],
+        ) => {
+          let claims: ObjectToken;
+          try {
+            claims = claimsFromQuery(request.query, secret, "PUT");
+          } catch (error) {
+            return envelope(reply, 403, "forbidden", error instanceof Error ? error.message : "forbidden");
+          }
+          const body = request.body;
+          if (!Buffer.isBuffer(body)) {
+            return envelope(reply, 400, "empty_body", "Upload body is missing.");
+          }
+          if (body.length > claims.maxBytes) {
+            return envelope(reply, 413, "too_large", `Upload exceeds ${claims.maxBytes} bytes.`);
+          }
+          const destination = resolveObjectPath(rootDir, claims.key);
+          const staging = await ensureStagingDirectory(rootDir);
+          const temporary = path.join(staging, `${randomBytes(16).toString("hex")}.partial`);
+          await mkdir(path.dirname(destination), { recursive: true });
+          try {
+            await writeFile(temporary, body);
+            await rename(temporary, destination);
+          } catch (error) {
+            await rm(temporary, { force: true });
+            throw error;
+          }
+          return { data: { key: claims.key }, meta: null, error: null };
+        };
+        const getObject = async (
+          request: { query: unknown },
+          reply: Parameters<typeof envelope>[0],
+        ) => {
           let claims: ObjectToken;
           try {
             claims = claimsFromQuery(request.query, secret, "GET");
@@ -236,7 +237,12 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
             return envelope(reply, 404, "not_found", "Object was not found.");
           }
           return reply.type("application/octet-stream").send(createReadStream(file));
-        });
+        };
+        // Presigned URLs use the /api prefix. The route is also mounted without it for tests.
+        for (const route of ["/storage/local/objects", "/api/storage/local/objects"]) {
+          scope.put(route, { bodyLimit: MAX_UPLOAD_BYTES }, putObject);
+          scope.get(route, getObject);
+        }
       });
     },
   };

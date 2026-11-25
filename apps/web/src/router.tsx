@@ -15,7 +15,6 @@ const AdminPage = lazy(() => import("./routes/admin/index"));
 const EmployeesPage = lazy(() => import("./routes/admin/employees"));
 const AssistantPage = lazy(() => import("./routes/admin/assistant"));
 const AnomaliesPage = lazy(() => import("./routes/admin/anomalies"));
-const EssPage = lazy(() => import("./routes/ess/index"));
 
 function Root() {
   return (
@@ -65,12 +64,6 @@ const anomaliesRoute = createRoute({
   component: AnomaliesPage,
 });
 
-const essRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/ess",
-  component: EssPage,
-});
-
 const children: AnyRoute[] = [
   indexRoute,
   signInRoute,
@@ -78,7 +71,6 @@ const children: AnyRoute[] = [
   employeesRoute,
   assistantRoute,
   anomaliesRoute,
-  essRoute,
 ];
 
 if (

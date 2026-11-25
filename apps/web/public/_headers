@@ -30,6 +30,14 @@
   ! Cache-Control
   Cache-Control: public, max-age=0, must-revalidate
 
+/ess-sw.js
+  ! Cache-Control
+  Cache-Control: public, max-age=0, must-revalidate
+
+/ess/index.html
+  ! Cache-Control
+  Cache-Control: public, max-age=0, must-revalidate
+
 /api
   ! Cache-Control
   Cache-Control: private, no-store

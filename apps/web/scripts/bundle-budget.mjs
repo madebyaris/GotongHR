@@ -45,13 +45,26 @@ function routeKeyFor(manifest, routeHint) {
   return index ?? keys[0];
 }
 
-function shellBytes(manifest, routeHint) {
-  const entry = Object.keys(manifest).find((key) => manifest[key]?.isEntry);
-  if (!entry) throw new Error("Manifest has no entry.");
-  const routeKey = routeKeyFor(manifest, routeHint);
-  if (!routeKey) throw new Error(`Manifest has no ${routeHint} chunk.`);
+function entryKey(manifest, name) {
+  if (manifest[name]?.isEntry) return name;
+  const found = Object.keys(manifest).find((key) => key.endsWith(name) && manifest[key]?.isEntry);
+  if (!found) throw new Error(`Manifest has no entry ${name}.`);
+  return found;
+}
+
+function graphBytes(manifest, key, htmlFile) {
   const files = new Set();
-  walk(manifest, entry, files, new Set());
+  walk(manifest, key, files, new Set());
+  let total = brotliSize(path.join(dist, htmlFile));
+  for (const file of files) total += brotliSize(path.join(dist, file));
+  return total;
+}
+
+function adminBytes(manifest) {
+  const files = new Set();
+  walk(manifest, entryKey(manifest, "index.html"), files, new Set());
+  const routeKey = routeKeyFor(manifest, "routes/admin");
+  if (!routeKey) throw new Error("Manifest has no routes/admin chunk.");
   walk(manifest, routeKey, files, new Set());
   let total = brotliSize(path.join(dist, "index.html"));
   for (const file of files) total += brotliSize(path.join(dist, file));
@@ -120,8 +133,8 @@ function main() {
     process.exit(1);
   }
 
-  const ess = shellBytes(manifest, "routes/ess");
-  const admin = shellBytes(manifest, "routes/admin");
+  const ess = graphBytes(manifest, entryKey(manifest, "ess/index.html"), "ess/index.html");
+  const admin = adminBytes(manifest);
   console.log(`ess brotli ${ess} bytes (cap ${ESS_CAP})`);
   console.log(`admin brotli ${admin} bytes (cap ${ADMIN_CAP})`);
   if (ess > ESS_CAP || admin > ADMIN_CAP) {

@@ -1,0 +1,142 @@
+:root {
+  color-scheme: light;
+  --ink: #1c1917;
+  --paper: #fafaf9;
+  --muted: #57534e;
+  --line: #e7e5e4;
+  --rust: #9a3412;
+  --fill: #1c1917;
+  --on-fill: #fafaf9;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.clock-screen {
+  width: min(100%, 24rem);
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: 1.25rem 1.25rem 2.5rem;
+}
+
+.clock-brand-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0;
+}
+
+.clock-brand {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.clock-offline {
+  color: var(--rust);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+h1 {
+  margin: 1.25rem 0 0;
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.clock-muted {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.clock-status {
+  margin: 1rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.clock-shift {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
+
+.clock-queue {
+  margin: 0.75rem 0 0;
+  font-weight: 650;
+}
+
+.clock-action {
+  display: block;
+  width: 100%;
+  margin-top: 1.25rem;
+  min-height: 3.5rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--fill);
+  color: var(--on-fill);
+  font: inherit;
+  font-size: 1.125rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.clock-action:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.clock-action:focus-visible,
+.clock-selfie input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.clock-selfie {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.clock-alert {
+  margin: 0.75rem 0 0;
+  color: var(--rust);
+}
+
+h2 {
+  margin: 2rem 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.clock-punches {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.clock-punches li {
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+a {
+  color: var(--ink);
+}
