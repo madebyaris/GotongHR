@@ -1,6 +1,6 @@
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor } from "@gotonghr/contracts";
-import { registerCoreHr } from "@gotonghr/core-hr";
+import { registerContractExpiryJob, registerCoreHr, scanContractExpiry } from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -85,6 +85,13 @@ export async function composeFromEnv(
     });
     const auth = createAuth({ appDb, env });
     await registerIdentity(app, { auth, appDb, env });
+    await registerContractExpiryJob(boss, async (now) => {
+      await scanContractExpiry({
+        appDb,
+        queueUrl: requiredEnv(env, "DATABASE_URL_QUEUE"),
+        now,
+      });
+    });
     await registerCoreHr(app, {
       appDb,
       guard: (permission) => requirePermission(permission),

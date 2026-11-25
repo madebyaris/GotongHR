@@ -25,6 +25,7 @@ export const hrEmployees = pgTable(
     branchId: uuid("branch_id").notNull(),
     departmentId: uuid("department_id"),
     positionId: uuid("position_id"),
+    managerEmployeeId: uuid("manager_employee_id"),
     employmentStatus: text("employment_status").notNull(),
     joinDate: date("join_date", { mode: "string" }).notNull(),
     ptkpStatus: text("ptkp_status").notNull(),
