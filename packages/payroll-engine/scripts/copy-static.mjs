@@ -7,5 +7,5 @@ for (const name of readdirSync("src/tables")) {
 
 mkdirSync("dist/coretax/xsd", { recursive: true });
 for (const name of readdirSync("src/coretax/xsd")) {
-  if (name.endsWith(".xsd")) copyFileSync(`src/coretax/xsd/${name}`, `dist/coretax/xsd/${name}`);
+  if (name.toLowerCase().endsWith(".xsd")) copyFileSync(`src/coretax/xsd/${name}`, `dist/coretax/xsd/${name}`);
 }

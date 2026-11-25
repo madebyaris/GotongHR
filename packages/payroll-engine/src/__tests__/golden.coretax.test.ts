@@ -12,5 +12,9 @@ test("coretax XSD validation", (t) => {
     t.skip("xsd missing");
     return;
   }
+  if (result.status === "unavailable") {
+    t.skip("xmllint unavailable");
+    return;
+  }
   assert.equal(result.status, "valid");
 });

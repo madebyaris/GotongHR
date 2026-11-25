@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { rupiah } from "../money.ts";
 import {
@@ -35,8 +37,14 @@ test("package exports coretax and bank-batch subpaths", () => {
   const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
     exports: Record<string, unknown>;
   };
-  assert.ok(pkg.exports["./coretax"]);
-  assert.ok(pkg.exports["./bank-batch"]);
+  assert.deepEqual(pkg.exports["./coretax"], {
+    types: "./dist/coretax/index.d.ts",
+    import: "./dist/coretax/index.js",
+  });
+  assert.deepEqual(pkg.exports["./bank-batch"], {
+    types: "./dist/bank-batch/index.d.ts",
+    import: "./dist/bank-batch/index.js",
+  });
 });
 
 test("scaled percents match the TER scale without floating point", () => {
@@ -195,6 +203,54 @@ test("an empty accepted batch is a document with no slips", () => {
   assert.equal(result.preflight.issues.length, 0);
   assert.ok(result.xml.includes("<ListOfMmPayroll>"));
   assert.equal(result.xml.includes("<MmPayroll>"), false);
+});
+
+test("a missing passport is nil, and a lone surrogate is not a slip", () => {
+  const missing = buildCoretaxBatch({
+    slipType: "BPMP",
+    withholder,
+    records: [bpmp({ passportNumber: undefined as never })],
+  });
+  assert.deepEqual(missing.preflight.rejectedEmployeeIds, []);
+  assert.ok(missing.xml.includes('<CounterpartPassport xsi:nil="true"/>'));
+  const emoji = "\u{1F600}";
+  const kept = buildCoretaxBatch({
+    slipType: "BPMP",
+    withholder,
+    records: [bpmp({ employeeId: "emoji", position: `Kasir ${emoji}` })],
+  });
+  assert.equal(count(kept.xml, "<MmPayroll>"), 1);
+  assert.ok(kept.xml.includes(emoji));
+  const lone = buildCoretaxBatch({
+    slipType: "BPMP",
+    withholder,
+    records: [bpmp({ employeeId: "lone", position: "Staff\uD800" })],
+  });
+  assert.deepEqual(lone.preflight.rejectedEmployeeIds, ["lone"]);
+  assert.equal(lone.xml.includes("\uD800"), false);
+  assert.equal(count(lone.xml, "<MmPayroll>"), 0);
+});
+
+test("schema lookup matches the slip type and does not use another file", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "gotong-xsd-"));
+  try {
+    writeFileSync(path.join(dir, "BP21.xsd"), "<xs:schema/>");
+    writeFileSync(path.join(dir, "A1Bulk.xsd"), "<xs:schema/>");
+    writeFileSync(path.join(dir, "MmPayrollBulk.xsd"), "<xs:schema/>");
+    const missed = validateCoretaxXml({ xml: "<x/>", slipType: "BP26", xsdDirectory: dir });
+    assert.deepEqual(missed, { status: "skipped", reason: "xsd missing for BP26" });
+    const bpmpResult = validateCoretaxXml({ xml: "<x/>", slipType: "BPMP", xsdDirectory: dir });
+    assert.notEqual(bpmpResult.status, "skipped");
+    if (bpmpResult.status !== "skipped") assert.equal(bpmpResult.schemaFile, "MmPayrollBulk.xsd");
+    const bp21Result = validateCoretaxXml({ xml: "<x/>", slipType: "BP21", xsdDirectory: dir });
+    assert.notEqual(bp21Result.status, "skipped");
+    if (bp21Result.status !== "skipped") assert.equal(bp21Result.schemaFile, "BP21.xsd");
+    const bpa1Result = validateCoretaxXml({ xml: "<x/>", slipType: "BPA1", xsdDirectory: dir });
+    assert.notEqual(bpa1Result.status, "skipped");
+    if (bpa1Result.status !== "skipped") assert.equal(bpa1Result.schemaFile, "A1Bulk.xsd");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("xsd validation skips when no schema file is shipped", (t) => {

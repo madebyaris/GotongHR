@@ -1,7 +1,14 @@
 import { isIsoDate } from "../civil-date.ts";
 import { rupiah } from "../money.ts";
 import { BankBatchInputError } from "./errors.ts";
-import { CONTROL_LAYOUT, MANDIRI_DETAIL_COLUMNS } from "./layout.ts";
+import {
+  BANK_FORMATS,
+  BCA_COLUMNS,
+  BNI_COLUMNS,
+  BRI_COLUMNS,
+  isKnownBank,
+  MANDIRI_DETAIL_COLUMNS,
+} from "./layout.ts";
 import { sanitizeAccountNumber, sanitizeBankCode, sanitizeBankText, sanitizeEmail } from "./sanitize.ts";
 import type { BankBatchExclusion, BankBatchFile, BankBatchId, BankBatchInput, BankPayment } from "./types.ts";
 import { verifyBankBatch } from "./verify.ts";
@@ -17,16 +24,28 @@ interface PreparedRow {
 }
 
 /**
- * Writes a bank file whose header total is the sum of the detail rows actually emitted.
- * A row with a bad account, an empty name, or a non-positive amount is excluded.
+ * Writes one bank's upload file. The control total is the sum of the rows actually emitted.
+ * A row with a bad account, an empty name, a bad bank code, or a non-positive amount is excluded.
  * An amount that is not a bigint throws TypeError.
  */
 export function formatBankBatch(bank: BankBatchId, input: BankBatchInput): BankBatchFile {
-  if (bank === "bca-klikbisnis" || bank === "bni-direct" || bank === "bri-qlola") {
-    return formatControl(bank, input);
+  if (!isKnownBank(bank)) {
+    throw new BankBatchInputError("Bank id must be bca-klikbisnis, mandiri-kopra, bni-direct, or bri-qlola.");
   }
-  if (bank === "mandiri-kopra") return formatMandiri(input);
-  throw new BankBatchInputError("Bank id must be bca-klikbisnis, mandiri-kopra, bni-direct, or bri-qlola.");
+  switch (bank) {
+    case "bca-klikbisnis":
+      return formatBca(input);
+    case "mandiri-kopra":
+      return formatMandiri(input);
+    case "bni-direct":
+      return formatBni(input);
+    case "bri-qlola":
+      return formatBri(input);
+    default: {
+      const unexpected: never = bank;
+      throw new BankBatchInputError(`Bank id is not a known batch format: ${String(unexpected)}`);
+    }
+  }
 }
 
 export function formatBcaKlikbisnis(input: BankBatchInput): BankBatchFile {
@@ -45,34 +64,98 @@ export function formatBriQlola(input: BankBatchInput): BankBatchFile {
   return formatBankBatch("bri-qlola", input);
 }
 
-function formatControl(bank: keyof typeof CONTROL_LAYOUT, input: BankBatchInput): BankBatchFile {
+function formatBca(input: BankBatchInput): BankBatchFile {
   const header = readHeader(input);
-  const layout = CONTROL_LAYOUT[bank];
+  const limits = BANK_FORMATS["bca-klikbisnis"];
   const prepared = prepareRows(input.payments, {
-    nameMax: layout.nameMax,
-    remarkMax: layout.remarkMax,
-    bankCode: layout.trailing === "bank-code" ? "required" : "ignore",
+    nameMax: limits.nameMax,
+    remarkMax: limits.remarkMax,
+    bankCode: "014",
   });
   const total = sumAmounts(prepared.rows);
   const lines = [
-    ["H", layout.code, header.yyyymmdd, header.debit, String(prepared.rows.length), total.toString()].join(","),
+    ["BCA_KLIKBISNIS", header.debit, header.yyyymmdd, String(prepared.rows.length), total.toString()].join(","),
+    BCA_COLUMNS,
     ...prepared.rows.map((row) =>
       [
-        "D",
         row.accountNumber,
         row.accountName,
         row.amountIdr.toString(),
+        row.bankCode,
+        row.bankCode === "014" ? "BCA" : "LLG",
         row.remark,
-        layout.trailing === "email" ? row.email : row.bankCode,
+        row.email,
       ].join(","),
     ),
   ];
-  return finish(bank, header.yyyymmdd, lines, total, prepared.rows.length, prepared.excluded);
+  return finish("bca-klikbisnis", header.yyyymmdd, lines, total, prepared.rows.length, prepared.excluded);
+}
+
+function formatBni(input: BankBatchInput): BankBatchFile {
+  const header = readHeader(input);
+  const limits = BANK_FORMATS["bni-direct"];
+  const prepared = prepareRows(input.payments, {
+    nameMax: limits.nameMax,
+    remarkMax: limits.remarkMax,
+    bankCode: "009",
+  });
+  const total = sumAmounts(prepared.rows);
+  const lines = [
+    ["BNI_DIRECT", header.debit, header.yyyymmdd, String(prepared.rows.length), total.toString()].join(","),
+    BNI_COLUMNS,
+    ...prepared.rows.map((row, index) =>
+      [
+        String(index + 1),
+        header.debit,
+        row.accountNumber,
+        row.accountName,
+        "IDR",
+        row.amountIdr.toString(),
+        row.remark,
+        row.bankCode === "009" ? "INHOUSE" : "SKN",
+        row.bankCode,
+        row.email,
+      ].join(","),
+    ),
+  ];
+  return finish("bni-direct", header.yyyymmdd, lines, total, prepared.rows.length, prepared.excluded);
+}
+
+function formatBri(input: BankBatchInput): BankBatchFile {
+  const header = readHeader(input);
+  const limits = BANK_FORMATS["bri-qlola"];
+  const prepared = prepareRows(input.payments, {
+    nameMax: limits.nameMax,
+    remarkMax: limits.remarkMax,
+    bankCode: "002",
+  });
+  const total = sumAmounts(prepared.rows);
+  const lines = [
+    BRI_COLUMNS,
+    ...prepared.rows.map((row, index) =>
+      [
+        String(index + 1),
+        row.accountName,
+        row.accountNumber,
+        row.amountIdr.toString(),
+        row.email,
+        row.remark,
+        row.bankCode,
+      ].join(","),
+    ),
+    ["BRI_QLOLA", header.debit, header.yyyymmdd, String(prepared.rows.length), total.toString()].join(","),
+  ];
+  return finish("bri-qlola", header.yyyymmdd, lines, total, prepared.rows.length, prepared.excluded);
 }
 
 function formatMandiri(input: BankBatchInput): BankBatchFile {
   const header = readHeader(input);
-  const prepared = prepareRows(input.payments, { nameMax: 70, remarkMax: 40, bankCode: "ignore" });
+  const limits = BANK_FORMATS["mandiri-kopra"];
+  const prepared = prepareRows(input.payments, {
+    nameMax: limits.nameMax,
+    remarkMax: limits.remarkMax,
+    bankCode: "ignore",
+  });
   const total = sumAmounts(prepared.rows);
   const lines = [
     ["P", header.yyyymmdd, header.debit, String(prepared.rows.length), `${total.toString()}.00`].join(","),
@@ -135,7 +218,7 @@ function readHeader(input: BankBatchInput): { debit: string; yyyymmdd: string } 
 
 function prepareRows(
   payments: readonly BankPayment[],
-  options: { nameMax: number; remarkMax: number; bankCode: "required" | "ignore" },
+  options: { nameMax: number; remarkMax: number; bankCode: string | "ignore" },
 ): { rows: PreparedRow[]; excluded: BankBatchExclusion[] } {
   const rows: PreparedRow[] = [];
   const excluded: BankBatchExclusion[] = [];
@@ -166,14 +249,10 @@ function prepareRows(
       });
       continue;
     }
-    let bankCode = "009";
-    if (options.bankCode === "required" && payment.bankCode !== undefined) {
-      const code = sanitizeBankCode(payment.bankCode);
-      if (code === null) {
-        excluded.push({ employeeId, field: "bankCode", reason: "Bank code must be three digits." });
-        continue;
-      }
-      if (code.length > 0) bankCode = code;
+    const bankCode = resolveBankCode(payment.bankCode, options.bankCode);
+    if (bankCode === null) {
+      excluded.push({ employeeId, field: "bankCode", reason: "Bank code must be three digits." });
+      continue;
     }
     const remarkText = sanitizeBankText(payment.remark, options.remarkMax);
     const remark = remarkText.length > 0 ? remarkText : "PAYROLL";
@@ -188,6 +267,14 @@ function prepareRows(
     });
   }
   return { rows, excluded };
+}
+
+function resolveBankCode(value: string | undefined, fallback: string | "ignore"): string | null {
+  if (fallback === "ignore") return "";
+  if (value === undefined) return fallback;
+  const code = sanitizeBankCode(value);
+  if (code === null || code.length === 0) return null;
+  return code;
 }
 
 function sumAmounts(rows: readonly PreparedRow[]): bigint {

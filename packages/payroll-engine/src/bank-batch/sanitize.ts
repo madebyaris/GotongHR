@@ -19,7 +19,7 @@ export function sanitizeBankText(value: string, maxLength: number): string {
   if (collapsed.length === 0) return "";
   const first = collapsed[0] ?? "";
   const guarded = FORMULA_START.has(first) ? `'${collapsed}` : collapsed;
-  return guarded.slice(0, maxLength);
+  return [...guarded].slice(0, maxLength).join("");
 }
 
 /** Keeps digits. Spaces and hyphens are removed. Any other character rejects the account. */
@@ -45,7 +45,8 @@ export function sanitizeEmail(value: string | undefined): string {
 
 /** Three digits, or empty when the caller omitted a code. Null means the code is present and unusable. */
 export function sanitizeBankCode(value: string | undefined): string | null {
-  if (value === undefined || value.length === 0) return "";
+  if (value === undefined) return "";
+  if (typeof value !== "string" || value.length === 0) return null;
   if (!/^[0-9]{3}$/.test(value)) return null;
   return value;
 }

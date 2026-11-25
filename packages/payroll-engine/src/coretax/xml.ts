@@ -158,8 +158,8 @@ function bpa1Fields(record: Bpa1Record): string[] {
   ];
 }
 
-function passport(value: string): string {
-  if (value.length === 0) return nilElement(3, "CounterpartPassport");
+function passport(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) return nilElement(3, "CounterpartPassport");
   return element(3, "CounterpartPassport", value);
 }
 

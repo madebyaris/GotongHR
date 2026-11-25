@@ -29,7 +29,15 @@ export function isAsciiDigits(value: string, length: number): boolean {
 export function hasIllegalXmlChar(value: string): boolean {
   for (const char of value) {
     const code = char.charCodeAt(0);
-    if (code < 0x20 || code === 0x7f || code === 0xfffe || code === 0xffff) return true;
+    if (
+      code < 0x20 ||
+      (char.length === 1 && code >= 0xd800 && code <= 0xdfff) ||
+      code === 0x7f ||
+      code === 0xfffe ||
+      code === 0xffff
+    ) {
+      return true;
+    }
   }
   return false;
 }

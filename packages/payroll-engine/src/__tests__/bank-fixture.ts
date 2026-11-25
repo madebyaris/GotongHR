@@ -45,13 +45,23 @@ export function increaseDetailAmount(body: string, amount: bigint): string {
   return `${body.slice(0, plainIndex)},${to},${body.slice(plainIndex + plain.length)}`;
 }
 
-/** Adds Rp1 to the header total and leaves the detail rows as written. */
+/** Adds Rp1 to the control total and leaves the detail rows as written. */
 export function increaseHeaderTotal(body: string): string {
-  const newlineAt = body.indexOf("\r\n");
-  const header = newlineAt >= 0 ? body.slice(0, newlineAt) : body;
+  const lines = body.split("\r\n");
+  let index = 0;
+  if (lines[0]?.startsWith("NO,NAMA,")) {
+    for (let cursor = lines.length - 1; cursor >= 0; cursor -= 1) {
+      if ((lines[cursor]?.length ?? 0) > 0) {
+        index = cursor;
+        break;
+      }
+    }
+  }
+  const header = lines[index] ?? "";
   const comma = header.lastIndexOf(",");
   const raw = header.slice(comma + 1);
   const whole = raw.endsWith(".00") ? raw.slice(0, -3) : raw;
   const next = `${(BigInt(whole) + 1n).toString()}${raw.endsWith(".00") ? ".00" : ""}`;
-  return `${header.slice(0, comma + 1)}${next}${body.slice(header.length)}`;
+  lines[index] = `${header.slice(0, comma + 1)}${next}`;
+  return lines.join("\r\n");
 }
