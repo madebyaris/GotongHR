@@ -93,9 +93,11 @@ test("owner adds an employee, keeps the masked NIK, and reveals it once", async 
   await expect(profile).toContainText("Jakarta Pusat");
 
   await profile.getByLabel("New department").fill("People Operations");
+  await profile.getByLabel("Department code").fill("PEOPLE");
   await profile.getByRole("button", { name: "Add department" }).click();
   await expect(profile.getByRole("option", { name: "People Operations" })).toHaveCount(1);
   await profile.getByLabel("New position").fill("HR Generalist");
+  await profile.getByLabel("Position code").fill("HRG");
   await profile.getByRole("button", { name: "Add position" }).click();
   await expect(profile.getByRole("option", { name: "HR Generalist" })).toHaveCount(1);
   await profile.getByRole("button", { name: "Save assignment" }).click();
@@ -104,7 +106,7 @@ test("owner adds an employee, keeps the masked NIK, and reveals it once", async 
 
   await profile.getByLabel("End date").fill("");
   await profile.getByRole("button", { name: "Add contract" }).click();
-  await expect(profile.getByText("Enter the contract end date.")).toBeVisible();
+  await expect(profile.getByText("A PKWT contract needs an end date.")).toBeVisible();
   await profile.getByLabel("Start date").fill(jakartaToday());
   await profile.getByLabel("End date").fill(endDate);
   await profile.getByRole("button", { name: "Add contract" }).click();
@@ -237,6 +239,8 @@ async function resetEmployees(): Promise<void> {
   try {
     await client.query(
       `TRUNCATE TABLE
+         att_clock_events,
+         hr_contract_expiry_notices,
          hr_compensation_profiles,
          hr_contracts,
          hr_documents,

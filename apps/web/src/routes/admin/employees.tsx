@@ -1,7 +1,5 @@
 import {
-  contractEndLabel,
   employmentStatuses,
-  filterDirectoryRows,
   type DepartmentRecord,
   type EmployeeRecord,
   type MeContext,
@@ -16,6 +14,7 @@ import { fieldClass } from "../shell";
 import { AdminFrame } from "./frame";
 import { EmployeeForm } from "./employee-form";
 import { todayJakarta } from "./employee-fields";
+import { contractEndLabel, filterDirectoryRows } from "./directory-view";
 import { EmployeeProfile } from "./employee-profile";
 
 const statusLabels: Record<string, string> = {
@@ -56,7 +55,7 @@ function EmployeesBody() {
 
   if (context.isPending) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <main className="mx-auto w-full max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-semibold tracking-tight">Employees</h1>
         <p className="mt-4 text-base text-muted-foreground">Loading employees…</p>
       </main>
@@ -65,7 +64,7 @@ function EmployeesBody() {
 
   if (!context.data) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-8">
+      <main className="mx-auto w-full max-w-5xl px-4 py-8">
         <h1 className="text-2xl font-semibold tracking-tight">Employees</h1>
         <p className="mt-4 text-base" role="alert">
           Employees could not be loaded.
@@ -145,7 +144,7 @@ function EmployeeDirectory({ context }: { context: MeContext }) {
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl overflow-x-clip px-4 py-6">
+    <main className="mx-auto w-full max-w-5xl overflow-x-clip px-4 py-6">
       <h1 className="text-2xl font-semibold tracking-tight">Employees</h1>
       <p className="mt-4 text-base" role="status">
         {notice ?? (rows.length === 0 ? "No employees yet." : employeeCount(rows.length))}

@@ -44,6 +44,7 @@ Each feature file starts with an H1 and one paragraph. Then it has these H2 sect
 - [Create a legal entity and a branch](./02-legal-entity-and-branch.md)
 - [Create an employee and see the masked NIK after reload](./03-employee-create-masked-nik.md)
 - [Reveal PII and see an audit row from a second read](./04-pii-reveal-audit-row.md)
+- [Review a flagged punch in the anomaly inbox](./07-anomaly-inbox.md)
 - [Find an employee and open the contract profile](./08-directory-and-contracts.md)
 
-`/ess` and `/admin/assistant` are outside this map.
+`/ess` and `/admin/assistant` are outside this map. `/admin/anomalies` is feature 07.

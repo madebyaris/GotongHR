@@ -7,13 +7,9 @@ import {
   fail,
   failWithFields,
   ok,
-  parseCompensationCreate,
-  parseContractCreate,
-  parseDepartmentCreate,
   parseEmployeeCreate,
   parseEmployeePatch,
   parsePiiReveal,
-  parsePositionCreate,
   type PermissionAtom,
 } from "@gotonghr/contracts";
 import type { TenantDatabase } from "@gotonghr/db";
@@ -25,18 +21,9 @@ import {
   EmployeeForbiddenError,
   EmployeeNotFoundError,
 } from "./errors.ts";
-import {
-  createCompensation,
-  createContract,
-  createDepartment,
-  createPosition,
-  listCompensation,
-  listContracts,
-  listDepartments,
-  listPositions,
-} from "./directory/service.ts";
 import { getEmployee, listEmployees } from "./read.ts";
 import { revealEmployeePii } from "./reveal.ts";
+import { registerOrgRoutes } from "./org/routes.ts";
 import { createEmployee, updateEmployee } from "./write.ts";
 
 const uuid =
@@ -86,74 +73,6 @@ export async function registerCoreHr(app: FastifyInstance, deps: CoreHrRouteDeps
     );
   });
 
-  app.get("/api/v1/departments", { preHandler: deps.guard("employee.read") }, async (request, reply) => {
-    return run(deps, request, reply, (auth) => listDepartments(deps.appDb, auth).then((rows) => ok(rows)));
-  });
-
-  app.post("/api/v1/departments", { preHandler: deps.guard("employee.write") }, async (request, reply) => {
-    const parsed = parseDepartmentCreate(request.body);
-    if (!parsed.ok) return invalid(reply, parsed.fields);
-    return run(deps, request, reply, async (auth) => {
-      const created = await createDepartment(deps.appDb, auth, parsed.value.name);
-      return reply.code(201).send(ok(created));
-    });
-  });
-
-  app.get("/api/v1/positions", { preHandler: deps.guard("employee.read") }, async (request, reply) => {
-    return run(deps, request, reply, (auth) => listPositions(deps.appDb, auth).then((rows) => ok(rows)));
-  });
-
-  app.post("/api/v1/positions", { preHandler: deps.guard("employee.write") }, async (request, reply) => {
-    const parsed = parsePositionCreate(request.body);
-    if (!parsed.ok) return invalid(reply, parsed.fields);
-    return run(deps, request, reply, async (auth) => {
-      const created = await createPosition(deps.appDb, auth, parsed.value);
-      return reply.code(201).send(ok(created));
-    });
-  });
-
-  app.get("/api/v1/employees/:id/contracts", { preHandler: deps.guard("employee.read") }, async (request, reply) => {
-    const id = routeId(request.params);
-    if (!id) return missing(reply);
-    return run(deps, request, reply, (auth) => listContracts(deps.appDb, auth, id).then((rows) => ok(rows)));
-  });
-
-  app.post("/api/v1/employees/:id/contracts", { preHandler: deps.guard("employee.write") }, async (request, reply) => {
-    const id = routeId(request.params);
-    if (!id) return missing(reply);
-    const parsed = parseContractCreate(request.body);
-    if (!parsed.ok) return invalid(reply, parsed.fields);
-    return run(deps, request, reply, async (auth) => {
-      const created = await createContract(deps.appDb, auth, id, parsed.value);
-      return reply.code(201).send(ok(created));
-    });
-  });
-
-  app.get(
-    "/api/v1/employees/:id/compensation-profiles",
-    { preHandler: deps.guard("employee.read") },
-    async (request, reply) => {
-      const id = routeId(request.params);
-      if (!id) return missing(reply);
-      return run(deps, request, reply, (auth) => listCompensation(deps.appDb, auth, id).then((rows) => ok(rows)));
-    },
-  );
-
-  app.post(
-    "/api/v1/employees/:id/compensation-profiles",
-    { preHandler: deps.guard("employee.write") },
-    async (request, reply) => {
-      const id = routeId(request.params);
-      if (!id) return missing(reply);
-      const parsed = parseCompensationCreate(request.body);
-      if (!parsed.ok) return invalid(reply, parsed.fields);
-      return run(deps, request, reply, async (auth) => {
-        const created = await createCompensation(deps.appDb, auth, id, parsed.value);
-        return reply.code(201).send(ok(created));
-      });
-    },
-  );
-
   app.post(
     "/api/v1/employees/:id/pii/reveal",
     { preHandler: deps.guard("employee.pii.reveal") },
@@ -167,6 +86,8 @@ export async function registerCoreHr(app: FastifyInstance, deps: CoreHrRouteDeps
       );
     },
   );
+
+  await registerOrgRoutes(app, deps);
 }
 
 async function run(

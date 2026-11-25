@@ -37,7 +37,7 @@ const columns = sql`
   p.bpjs_tk_no_mask,
   p.bank_account_number_mask,
   d.name AS department_name,
-  pos.name AS position_name,
+  pos.title AS position_name,
   contract.contract_type,
   contract.end_date::text AS contract_end_date
 `;
@@ -53,9 +53,10 @@ const employeeFrom = sql`
     WHERE c.employee_id = e.id AND c.tenant_id = e.tenant_id
     ORDER BY
       CASE
-        WHEN c.start_date <= (timezone('Asia/Jakarta', now()))::date
+        WHEN c.status = 'active'
+         AND c.start_date <= (timezone('Asia/Jakarta', now()))::date
          AND (c.end_date IS NULL OR c.end_date >= (timezone('Asia/Jakarta', now()))::date) THEN 0
-        WHEN c.start_date > (timezone('Asia/Jakarta', now()))::date THEN 1
+        WHEN c.status = 'active' AND c.start_date > (timezone('Asia/Jakarta', now()))::date THEN 1
         ELSE 2
       END,
       c.end_date ASC NULLS LAST,

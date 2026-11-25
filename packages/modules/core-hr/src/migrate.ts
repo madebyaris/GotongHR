@@ -1,8 +1,8 @@
 import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE, tenantIsolationPolicySql } from "@gotonghr/db";
 import pg from "pg";
-import { migrateDirectory } from "./directory/ddl.ts";
 import { migrateHrDocuments } from "./documents/ddl.ts";
 import { migrateHrImportJobs } from "./imports/ddl.ts";
+import { migrateOrg } from "./org/migrate.ts";
 
 const { Client } = pg;
 
@@ -29,7 +29,6 @@ export async function migrateCoreHr(input: CoreHrMigrateInput): Promise<void> {
         await migrator.query(tenantIsolationPolicySql(table));
         await grantAppDml(migrator, table);
       }
-      await migrateDirectory(migrator);
       await migrateHrDocuments(migrator);
       await migrateHrImportJobs(migrator);
       await migrator.query("COMMIT");
@@ -40,6 +39,7 @@ export async function migrateCoreHr(input: CoreHrMigrateInput): Promise<void> {
   } finally {
     await migrator.end();
   }
+  await migrateOrg(input);
 }
 
 async function grantAppDml(client: pg.Client, table: string): Promise<void> {
@@ -155,11 +155,11 @@ CREATE INDEX IF NOT EXISTS hr_employee_pii_npwp_hash_idx
   WHERE npwp_hash IS NOT NULL;
 
 COMMENT ON TABLE hr_employees IS
-  'Employee master without ciphertext. Department and position are optional. FORCE RLS. platform_admin has no privileges.';
+  'Employee master without ciphertext. Org foreign keys are added by the org migration. FORCE RLS. platform_admin has no privileges.';
 COMMENT ON TABLE hr_employee_pii IS
   'One row per employee. Ciphertext plus blind indexes. Lists read nik_mask and npwp_mask and do not decrypt. nik_hash is unique per tenant.';
-COMMENT ON COLUMN hr_employees.department_id IS 'Optional department. The foreign key is added with hr_departments.';
-COMMENT ON COLUMN hr_employees.position_id IS 'Optional position. The foreign key is added with hr_positions.';
+COMMENT ON COLUMN hr_employees.department_id IS 'Optional department. The org migration adds the foreign key.';
+COMMENT ON COLUMN hr_employees.position_id IS 'Optional position. The org migration adds the foreign key.';
 
 CREATE OR REPLACE FUNCTION hr_touch_updated_at()
 RETURNS trigger

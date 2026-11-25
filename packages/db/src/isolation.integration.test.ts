@@ -28,6 +28,7 @@ const requiredTenantTables = [
   "ai_knowledge_chunks",
   "ai_messages",
   "att_approval_delegations",
+  "att_clock_events",
   "att_daily_summaries",
   "att_holidays",
   "att_leave_balances",
@@ -42,6 +43,7 @@ const requiredTenantTables = [
   "aud_pii_access_logs",
   "aud_tenant_keys",
   "hr_compensation_profiles",
+  "hr_contract_expiry_notices",
   "hr_contracts",
   "hr_departments",
   "hr_documents",
@@ -67,6 +69,7 @@ const platformDeniedTables = [
   "ai_knowledge_chunks",
   "ai_messages",
   "att_approval_delegations",
+  "att_clock_events",
   "att_daily_summaries",
   "att_holidays",
   "att_leave_balances",
@@ -76,6 +79,7 @@ const platformDeniedTables = [
   "att_rosters",
   "att_shifts",
   "hr_compensation_profiles",
+  "hr_contract_expiry_notices",
   "hr_contracts",
   "hr_departments",
   "hr_documents",
@@ -257,6 +261,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "att_clock_events",
       "att_rosters",
       "att_leave_requests",
       "att_leave_balances",
@@ -266,15 +271,16 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       "att_approval_delegations",
       "att_leave_types",
       "att_shifts",
+      "hr_contract_expiry_notices",
       "hr_compensation_profiles",
       "hr_contracts",
-      "hr_departments",
       "hr_documents",
       "hr_import_jobs",
-      "hr_positions",
       "ai_knowledge_chunks",
       "hr_employee_pii",
       "hr_employees",
+      "hr_positions",
+      "hr_departments",
       "ai_messages",
       "ai_action_proposals",
       "ai_conversations",
@@ -536,7 +542,7 @@ async function scopedOrDenied(
   }
 }
 
-/** Runs identity, platform, audit, and AI migrates without a package dependency from db. */
+/** Runs identity, platform, audit, core-hr, clock, and AI migrates without a package dependency from db. */
 async function applyTenantSchema(): Promise<void> {
   const script = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -683,8 +689,6 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const employeeB = randomUUID();
   const employeePiiA = randomUUID();
   const employeePiiB = randomUUID();
-  const documentA = randomUUID();
-  const documentB = randomUUID();
   const departmentA = randomUUID();
   const departmentB = randomUUID();
   const positionA = randomUUID();
@@ -693,6 +697,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const contractB = randomUUID();
   const compensationA = randomUUID();
   const compensationB = randomUUID();
+  const noticeA = randomUUID();
+  const noticeB = randomUUID();
+  const documentA = randomUUID();
+  const documentB = randomUUID();
   const importA = randomUUID();
   const importB = randomUUID();
   const conversationA = randomUUID();
@@ -701,6 +709,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const messageB = randomUUID();
   const proposalA = randomUUID();
   const proposalB = randomUUID();
+  const clockA = randomUUID();
+  const clockB = randomUUID();
+  const clockKeyA = randomUUID();
+  const clockKeyB = randomUUID();
   const chunkA = randomUUID();
   const chunkB = randomUUID();
   const sopDocA = randomUUID();
@@ -830,13 +842,51 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       [probeA, probeB, tenantA, tenantB],
     );
     await superuser.query(
+      `INSERT INTO hr_departments (
+         id, tenant_id, legal_entity_id, branch_id, name, code
+       ) VALUES
+         ($1, $3, $5, $7, 'People A', 'PEOPLE'),
+         ($2, $4, $6, $8, 'People B', 'PEOPLE')`,
+      [departmentA, departmentB, tenantA, tenantB, entityA, entityB, branchA, branchB],
+    );
+    await superuser.query(
+      `INSERT INTO hr_positions (id, tenant_id, department_id, title, code, level_code) VALUES
+         ($1, $3, $5, 'Staff A', 'STAFF', 'L1'),
+         ($2, $4, $6, 'Staff B', 'STAFF', 'L1')`,
+      [positionA, positionB, tenantA, tenantB, departmentA, departmentB],
+    );
+    await superuser.query(
       `INSERT INTO hr_employees (
          id, tenant_id, employee_code, full_name, legal_entity_id, branch_id,
-         employment_status, join_date, ptkp_status, tax_method, pph21_subject_type
+         department_id, position_id, employment_status, join_date, ptkp_status,
+         tax_method, pph21_subject_type
        ) VALUES
-         ($1, $3, 'A001', 'Employee A', $5, $7, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent'),
-         ($2, $4, 'B001', 'Employee B', $6, $8, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent')`,
-      [employeeA, employeeB, tenantA, tenantB, entityA, entityB, branchA, branchB],
+         ($1, $3, 'A001', 'Employee A', $5, $7, $9, $11, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent'),
+         ($2, $4, 'B001', 'Employee B', $6, $8, $10, $12, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent')`,
+      [
+        employeeA,
+        employeeB,
+        tenantA,
+        tenantB,
+        entityA,
+        entityB,
+        branchA,
+        branchB,
+        departmentA,
+        departmentB,
+        positionA,
+        positionB,
+      ],
+    );
+    await superuser.query(
+      `INSERT INTO att_clock_events (
+         id, tenant_id, employee_id, branch_id, idempotency_key,
+         punch_type, captured_at, received_at, clock_drift_seconds,
+         sync_source, lat, lng, geofence_ok, review_status
+       ) VALUES
+         ($1, $3, $5, $7, $9, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok'),
+         ($2, $4, $6, $8, $10, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok')`,
+      [clockA, clockB, tenantA, tenantB, employeeA, employeeB, branchA, branchB, clockKeyA, clockKeyB],
     );
     await superuser.query(
       `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask) VALUES
@@ -854,32 +904,49 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ],
     );
     await superuser.query(
-      `INSERT INTO hr_departments (id, tenant_id, name) VALUES
-         ($1, $3, 'People A'),
-         ($2, $4, 'People B')`,
-      [departmentA, departmentB, tenantA, tenantB],
-    );
-    await superuser.query(
-      `INSERT INTO hr_positions (id, tenant_id, department_id, name) VALUES
-         ($1, $3, $5, 'Staff A'),
-         ($2, $4, $6, 'Staff B')`,
-      [positionA, positionB, tenantA, tenantB, departmentA, departmentB],
-    );
-    await superuser.query(
       `INSERT INTO hr_contracts (
-         id, tenant_id, employee_id, contract_type, start_date, end_date
+         id, tenant_id, employee_id, contract_type, status, start_date, end_date,
+         department_id, position_id
        ) VALUES
-         ($1, $3, $5, 'PKWTT', '2024-01-15', NULL),
-         ($2, $4, $6, 'PKWTT', '2024-01-15', NULL)`,
-      [contractA, contractB, tenantA, tenantB, employeeA, employeeB],
+         ($1, $3, $5, 'PKWT', 'active', '2024-01-01', '2026-12-31', $7, $9),
+         ($2, $4, $6, 'PKWT', 'active', '2024-01-01', '2026-12-31', $8, $10)`,
+      [
+        contractA,
+        contractB,
+        tenantA,
+        tenantB,
+        employeeA,
+        employeeB,
+        departmentA,
+        departmentB,
+        positionA,
+        positionB,
+      ],
     );
     await superuser.query(
       `INSERT INTO hr_compensation_profiles (
-         id, tenant_id, employee_id, base_salary_idr, effective_from
+         id, tenant_id, employee_id, base_salary_idr, fixed_allowances_json, bpjs_flags_json, effective_from
        ) VALUES
-         ($1, $3, $5, 5000000, '2024-01-15'),
-         ($2, $4, $6, 5000000, '2024-01-15')`,
+         ($1, $3, $5, 5000000, '{}'::jsonb, '{}'::jsonb, '2024-01-01'),
+         ($2, $4, $6, 5000000, '{}'::jsonb, '{}'::jsonb, '2024-01-01')`,
       [compensationA, compensationB, tenantA, tenantB, employeeA, employeeB],
+    );
+    await superuser.query(
+      `INSERT INTO hr_contract_expiry_notices (
+         id, tenant_id, contract_id, window_days, notice_on, dedupe_key
+       ) VALUES
+         ($1, $3, $5, 30, '2026-01-01', $7),
+         ($2, $4, $6, 30, '2026-01-01', $8)`,
+      [
+        noticeA,
+        noticeB,
+        tenantA,
+        tenantB,
+        contractA,
+        contractB,
+        `contract:${contractA}:window:30:on:2026-01-01`,
+        `contract:${contractB}:window:30:on:2026-01-01`,
+      ],
     );
     await superuser.query(
       `INSERT INTO hr_documents (
@@ -1065,6 +1132,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["ai_knowledge_chunks", { a: chunkA, b: chunkB }],
       ["ai_messages", { a: messageA, b: messageB }],
       ["att_approval_delegations", { a: delegationA, b: delegationB }],
+      ["att_clock_events", { a: clockA, b: clockB }],
       ["att_daily_summaries", { a: summaryA, b: summaryB }],
       ["att_holidays", { a: holidayA, b: holidayB }],
       ["att_leave_balances", { a: leaveBalanceA, b: leaveBalanceB }],
@@ -1079,6 +1147,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["aud_pii_access_logs", { a: piiA, b: piiB }],
       ["aud_tenant_keys", { a: keyA, b: keyB }],
       ["hr_compensation_profiles", { a: compensationA, b: compensationB }],
+      ["hr_contract_expiry_notices", { a: noticeA, b: noticeB }],
       ["hr_contracts", { a: contractA, b: contractB }],
       ["hr_departments", { a: departmentA, b: departmentB }],
       ["hr_documents", { a: documentA, b: documentB }],
@@ -1122,6 +1191,8 @@ async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   await superuser.query("DELETE FROM sys_platform_audit_events WHERE target_tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM sys_support_grants WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_clock_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM hr_contract_expiry_notices WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_compensation_profiles WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_contracts WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_documents WHERE tenant_id = ANY($1::uuid[])", [tenants]);

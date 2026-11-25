@@ -1,11 +1,9 @@
 import {
-  contractEndLabel,
-  formatDirectoryDate,
   parseCompensationCreate,
   parseContractCreate,
   parseDepartmentCreate,
   parsePositionCreate,
-  type CompensationRecord,
+  type CompensationProfileRecord,
   type ContractRecord,
   type DepartmentRecord,
   type EmployeeRecord,
@@ -20,6 +18,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError, apiData } from "@/lib/api";
 import { TextField } from "../shell";
+import { contractEndLabel, formatDirectoryDate } from "./directory-view";
 import { SelectField } from "./employee-fields";
 
 const contractOptions = [
@@ -72,12 +71,15 @@ export function EmployeeProfile({
   });
   const pay = useQuery({
     queryKey: ["compensation", employee.id],
-    queryFn: () => apiData<CompensationRecord[]>(`/api/v1/employees/${employee.id}/compensation-profiles`),
+    queryFn: () =>
+      apiData<CompensationProfileRecord[]>(`/api/v1/employees/${employee.id}/compensation-profiles`),
   });
   const [departmentId, setDepartmentId] = useState(employee.departmentId ?? "");
   const [positionId, setPositionId] = useState(employee.positionId ?? "");
   const [departmentName, setDepartmentName] = useState("");
+  const [departmentCode, setDepartmentCode] = useState("");
   const [positionName, setPositionName] = useState("");
+  const [positionCode, setPositionCode] = useState("");
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [assignmentErrors, setAssignmentErrors] = useState<Record<string, string>>({});
   const [contractType, setContractType] = useState("PKWT");
@@ -91,7 +93,7 @@ export function EmployeeProfile({
   const [payErrors, setPayErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const positionChoices = (positions.data ?? []).filter(
-    (item) => !departmentId || item.departmentId === null || item.departmentId === departmentId,
+    (item) => !departmentId || item.departmentId === departmentId,
   );
 
   async function refreshEmployee(): Promise<void> {
@@ -113,7 +115,12 @@ export function EmployeeProfile({
 
   async function onDepartment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parsed = parseDepartmentCreate({ name: departmentName });
+    const parsed = parseDepartmentCreate({
+      legalEntityId: employee.legalEntityId,
+      branchId: employee.branchId,
+      name: departmentName,
+      code: departmentCode,
+    });
     if (!parsed.ok) {
       setAssignmentErrors(fieldMap(parsed.fields));
       setAssignmentError("Check the highlighted fields.");
@@ -128,6 +135,7 @@ export function EmployeeProfile({
         body: JSON.stringify(parsed.value),
       });
       setDepartmentName("");
+      setDepartmentCode("");
       setDepartmentId(created.id);
       await queryClient.invalidateQueries({ queryKey: ["departments"] });
     } catch (caught) {
@@ -139,7 +147,11 @@ export function EmployeeProfile({
 
   async function onPosition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parsed = parsePositionCreate({ name: positionName, departmentId: departmentId || null });
+    const parsed = parsePositionCreate({
+      departmentId,
+      title: positionName,
+      code: positionCode,
+    });
     if (!parsed.ok) {
       setAssignmentErrors(fieldMap(parsed.fields));
       setAssignmentError("Check the highlighted fields.");
@@ -154,6 +166,7 @@ export function EmployeeProfile({
         body: JSON.stringify(parsed.value),
       });
       setPositionName("");
+      setPositionCode("");
       setPositionId(created.id);
       await queryClient.invalidateQueries({ queryKey: ["positions"] });
     } catch (caught) {
@@ -190,6 +203,8 @@ export function EmployeeProfile({
       contractType,
       startDate,
       endDate: contractType === "PKWTT" ? null : endDate,
+      departmentId: departmentId || null,
+      positionId: positionId || null,
     });
     if (!parsed.ok) {
       setContractErrors(fieldMap(parsed.fields));
@@ -202,11 +217,7 @@ export function EmployeeProfile({
     try {
       await apiData<ContractRecord>(`/api/v1/employees/${employee.id}/contracts`, {
         method: "POST",
-        body: JSON.stringify({
-          contractType: parsed.value.contractType,
-          startDate: parsed.value.startDate,
-          endDate: parsed.value.endDate,
-        }),
+        body: JSON.stringify(parsed.value),
       });
       setEndDate("");
       await queryClient.invalidateQueries({ queryKey: ["contracts", employee.id] });
@@ -230,7 +241,7 @@ export function EmployeeProfile({
     setPayError(null);
     setPayErrors({});
     try {
-      await apiData<CompensationRecord>(`/api/v1/employees/${employee.id}/compensation-profiles`, {
+      await apiData<CompensationProfileRecord>(`/api/v1/employees/${employee.id}/compensation-profiles`, {
         method: "POST",
         body: JSON.stringify({ baseSalaryIdr, effectiveFrom: parsed.value.effectiveFrom }),
       });
@@ -243,7 +254,7 @@ export function EmployeeProfile({
     }
   }
 
-  const payRows = pay.data ?? [];
+  const payRows = [...(pay.data ?? [])].reverse();
 
   return (
     <section className="mt-8 max-w-xl border-t border-border pt-6" aria-label="Employee profile">
@@ -286,7 +297,7 @@ export function EmployeeProfile({
             error={assignmentErrors.positionId ?? null}
             disabled={pending}
             onChange={setPositionId}
-            options={positionChoices.map((item) => ({ value: item.id, label: item.name }))}
+            options={positionChoices.map((item) => ({ value: item.id, label: item.title }))}
           />
           <Button className="mt-4 min-h-11" type="submit" variant="outline" disabled={pending}>
             Save assignment
@@ -306,6 +317,16 @@ export function EmployeeProfile({
               inputMode="text"
               autoComplete="off"
             />
+            <TextField
+              id="departmentCode"
+              label="Department code"
+              value={departmentCode}
+              onChange={setDepartmentCode}
+              error={assignmentErrors.code ?? null}
+              readOnly={pending}
+              inputMode="text"
+              autoComplete="off"
+            />
             <Button className="mt-4 min-h-11" type="submit" variant="outline" disabled={pending}>
               Add department
             </Button>
@@ -316,7 +337,17 @@ export function EmployeeProfile({
               label="New position"
               value={positionName}
               onChange={setPositionName}
-              error={null}
+              error={assignmentErrors.title ?? null}
+              readOnly={pending}
+              inputMode="text"
+              autoComplete="off"
+            />
+            <TextField
+              id="positionCode"
+              label="Position code"
+              value={positionCode}
+              onChange={setPositionCode}
+              error={assignmentErrors.code ?? null}
               readOnly={pending}
               inputMode="text"
               autoComplete="off"
@@ -397,7 +428,7 @@ export function EmployeeProfile({
           <li key={row.id} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2">
             <span>
               {formatDirectoryDate(row.effectiveFrom)}
-              <span className="ml-2 text-sm text-muted-foreground">{payNote(payRows, row, today)}</span>
+              <span className="ml-2 text-sm text-muted-foreground">{payNote(row, today)}</span>
             </span>
             <span className="font-medium">{formatIdr(BigInt(row.baseSalaryIdr))}</span>
           </li>
@@ -473,10 +504,10 @@ export function EmployeeProfile({
   );
 }
 
-function payNote(rows: CompensationRecord[], row: CompensationRecord, today: string): string {
+function payNote(row: CompensationProfileRecord, today: string): string {
   if (row.effectiveFrom > today) return "Scheduled";
-  const current = rows.find((item) => item.effectiveFrom <= today);
-  return current?.id === row.id ? "Current" : "Earlier";
+  if (row.effectiveTo === null || row.effectiveTo >= today) return "Current";
+  return "Earlier";
 }
 
 function fieldMap(fields: FieldIssue[]): Record<string, string> {

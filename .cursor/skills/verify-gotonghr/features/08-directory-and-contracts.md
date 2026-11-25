@@ -27,6 +27,7 @@ Preconditions:
 
 - **Search.** `page.getByLabel("Name or code").fill("Widyaningrum")`. The long-name employee stays. `Sari Wulandari` is not visible. Clear the field and both names are visible again.
 - **Open.** `page.getByRole("button", { name: "Anastasia Putri Widyaningrum Kartikasari" }).click()`. The profile heading with that name is visible. The legal entity and branch names are visible.
+- **Assignment.** Fill `New department` and `Department code`, choose `Add department`, then fill `New position` and `Position code` and choose `Add position`. `Save assignment` puts the department and position on the directory row.
 - **Contract.** On the profile, set `Contract type` to `PKWT`, fill `Start date` and `End date`, and choose `Add contract`. The profile and the directory row show `PKWT` and the end date. A date inside 90 days includes `ends in`.
 - **Pay.** Fill `Base salary` with `8.500.000` and choose `Add pay`. The profile shows `Rp8.500.000`. There is no button that edits that row.
 - **Proof.** Save a wide screenshot and a 390px screenshot of the directory with the long name and the end date visible. The page does not scroll sideways at 390px.
@@ -34,7 +35,7 @@ Preconditions:
 ## Gotchas
 
 - `@reui/c-data-grid-1` does not ask for `REUI_LICENSE_KEY`. Its grid scrolls sideways, so this screen uses the stock table and wraps rows at 390px.
-- A PKWT without an end date shows `Enter the contract end date.` A PKWTT has no end date field.
+- A PKWT without an end date shows `A PKWT contract needs an end date.` A PKWTT has no end date field. A department needs a code. A position needs a title and a code.
 - The directory end date is the active contract, then a future contract, then the latest ended contract.
 - Pay history is append-only. A second profile on the same `Effective date` is rejected. `PATCH` on that route is not registered.
 - The masked NIK stays in a table cell. The revealed digits are the profile status `NIK …`, not a second copy in the table.

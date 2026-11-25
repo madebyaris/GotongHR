@@ -11,16 +11,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
-    "pretypecheck": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/audit build",
+    "pretypecheck": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/audit build && pnpm --filter @gotonghr/storage build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/audit build",
-    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/schedules/*.test.ts"
+    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/audit build && pnpm --filter @gotonghr/identity build && pnpm --filter @gotonghr/core-hr build && pnpm --filter @gotonghr/storage build && pnpm exec tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@gotonghr/audit": "workspace:*",
     "@gotonghr/contracts": "workspace:*",
     "@gotonghr/db": "workspace:*",
+    "@gotonghr/storage": "workspace:*",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.8",
     "pg": "8.23.1"

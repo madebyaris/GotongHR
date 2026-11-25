@@ -1,4 +1,4 @@
-import type { ContractType } from "./directory.ts";
+import type { ContractType } from "./org-structure.ts";
 import type { FieldIssue } from "./envelope.ts";
 import type { ParseObjectResult, ParseResult } from "./org.ts";
 import { ptkpStatuses, type Pph21SubjectType, type PtkpStatus, type TaxMethod } from "./core-hr-payroll.port.ts";

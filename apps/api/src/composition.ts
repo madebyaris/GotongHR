@@ -1,7 +1,13 @@
-import { registerAttendanceRoutes } from "@gotonghr/attendance";
+import { registerAnomalyRoutes, registerAttendanceRoutes, registerClockRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor, PermissionAtom } from "@gotonghr/contracts";
-import { registerCoreHr, registerEmployeeDocuments, registerEmployeeImports } from "@gotonghr/core-hr";
+import {
+  registerContractExpiryJob,
+  registerCoreHr,
+  registerEmployeeDocuments,
+  registerEmployeeImports,
+  scanContractExpiry,
+} from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -108,6 +114,13 @@ export async function composeFromEnv(
       };
     };
     await registerIdentity(app, { auth, appDb, env });
+    await registerContractExpiryJob(boss, async (now) => {
+      await scanContractExpiry({
+        appDb,
+        queueUrl: requiredEnv(env, "DATABASE_URL_QUEUE"),
+        now,
+      });
+    });
     await registerCoreHr(app, { appDb, guard, readAuth });
     await registerEmployeeDocuments(app, { appDb, storage, guard, readAuth });
     await registerEmployeeImports(app, {
@@ -130,6 +143,38 @@ export async function composeFromEnv(
           userId: current.userId,
           role: current.role,
           permissions: current.permissions,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
+    });
+    await registerClockRoutes(app, {
+      database: appDb,
+      storage,
+      guard: requireMember(),
+      readCaller(request) {
+        const auth = request.gotongAuth;
+        if (!auth) return null;
+        return {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          scopeBranchIds: auth.scopeBranchIds,
+        };
+      },
+    });
+    await registerAnomalyRoutes(app, {
+      database: appDb,
+      guard: requirePermission("attendance.approve"),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
+          scopeBranchIds: current.scopeBranchIds,
           ipAddress: request.ip || null,
           userAgent: typeof agent === "string" ? agent : null,
         };
