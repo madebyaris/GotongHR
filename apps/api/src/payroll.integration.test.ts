@@ -95,15 +95,20 @@ describe("payroll adapters keep a calculated line", { concurrency: 1 }, () => {
       [branchId, tenantId, entityId],
     );
     await admin.query(
+      `INSERT INTO id_users (id, tenant_id, auth_user_id, email, display_name)
+       VALUES ($1::uuid, $2::uuid, $3, $4, 'Sari Wulandari')`,
+      [userId, tenantId, `payroll-${userId}`, `sari-${userId}@payroll.test`],
+    );
+    await admin.query(
       `INSERT INTO hr_employees (
          id, tenant_id, employee_code, full_name, legal_entity_id, branch_id,
          employment_status, join_date, ptkp_status, tax_method, pph21_subject_type,
-         date_of_birth
+         user_id, date_of_birth
        ) VALUES (
          $1::uuid, $2::uuid, 'E1', 'Sari Wulandari', $3::uuid, $4::uuid,
-         'active', '2024-01-01', 'TK/0', 'gross', 'permanent', '1990-01-15'
+         'active', '2024-01-01', 'TK/0', 'gross', 'permanent', $5::uuid, '1990-01-15'
        )`,
-      [employeeId, tenantId, entityId, branchId],
+      [employeeId, tenantId, entityId, branchId, userId],
     );
     await seedPii(appDb, tenantId, employeeId);
     await admin.query(

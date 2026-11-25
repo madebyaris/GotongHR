@@ -245,34 +245,59 @@ export async function registerPlatformOperator(
 export interface HealthTenant {
   tenantId: string;
   status: "active" | "suspended";
-  activeUsers: null;
-  peakClockIns: null;
-  queueDepth: null;
+  activeUsers: number;
+  peakClockIns: number;
+  queueDepth: number;
   webhookFailureRate: null;
-  storageBytes: null;
+  storageBytes: number;
 }
 
+/**
+ * Counters come from platform_tenant_health().
+ * That function does not read employee PII or payroll line items.
+ * storageBytes is document bytes plus payroll export bytes.
+ * Payslip PDF sizes are not included.
+ * peakClockIns is the clock-in count. webhookFailureRate stays empty until webhooks exist.
+ */
 export async function listTenantHealth(platform: PlatformDatabase): Promise<HealthTenant[]> {
-  const tenants: TenantSummary[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < 40; page += 1) {
-    const listed = await listTenants(platform, {
-      limit: MAX_TENANT_PAGE,
-      ...(cursor ? { cursor } : {}),
-    });
-    tenants.push(...listed.items);
-    if (!listed.hasMore || !listed.nextCursor) break;
-    cursor = listed.nextCursor;
-  }
-  return tenants.map((tenant) => ({
-    tenantId: tenant.id,
-    status: tenant.status,
-    activeUsers: null,
-    peakClockIns: null,
-    queueDepth: null,
+  const result = await platform.pool.query<{
+    tenant_id: string;
+    tenant_status: string;
+    active_users: string | number;
+    clock_in_count: string | number;
+    queue_depth: string | number;
+    storage_bytes: string | number;
+  }>(
+    `SELECT tenant_id::text AS tenant_id,
+            tenant_status,
+            active_users,
+            clock_in_count,
+            queue_depth,
+            storage_bytes
+     FROM platform_tenant_health()`,
+  );
+  return result.rows.map((row) => ({
+    tenantId: row.tenant_id,
+    status: tenantStatus(row.tenant_status),
+    activeUsers: asCount(row.active_users),
+    peakClockIns: asCount(row.clock_in_count),
+    queueDepth: asCount(row.queue_depth),
     webhookFailureRate: null,
-    storageBytes: null,
+    storageBytes: asCount(row.storage_bytes),
   }));
+}
+
+function tenantStatus(value: string): "active" | "suspended" {
+  if (value === "active" || value === "suspended") return value;
+  throw new PlatformError(500, "internal_error", "Tenant status is invalid.");
+}
+
+function asCount(value: string | number): number {
+  const count = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new PlatformError(500, "internal_error", "Health counter is invalid.");
+  }
+  return count;
 }
 
 export async function writeAudit(

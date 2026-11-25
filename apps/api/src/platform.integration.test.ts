@@ -543,10 +543,24 @@ describe("platform admin", { concurrency: 1 }, () => {
     const health = await get("/api/v1/platform/health/tenants", operatorCookie);
     assert.equal(health.statusCode, 200, health.body);
     const healthRow = readData<
-      Array<{ tenantId: string; activeUsers: number | null; queueDepth: number | null }>
+      Array<{
+        tenantId: string;
+        status: string;
+        activeUsers: number;
+        peakClockIns: number;
+        queueDepth: number;
+        webhookFailureRate: null;
+        storageBytes: number;
+      }>
     >(health.body).find((row) => row.tenantId === tenant.id);
-    assert.equal(healthRow?.activeUsers, null);
-    assert.equal(healthRow?.queueDepth, null);
+    assert.equal(healthRow?.status, "active");
+    assert.equal(healthRow?.activeUsers, 3);
+    assert.equal(healthRow?.peakClockIns, 0);
+    assert.equal(healthRow?.queueDepth, 0);
+    assert.equal(healthRow?.storageBytes, 0);
+    assert.equal(healthRow?.webhookFailureRate, null);
+    assert.equal(health.body.includes(ownerEmail), false);
+    assert.equal(/\d{16}/.test(health.body), false);
 
     const audits = await get("/api/v1/platform/audit-events", operatorCookie);
     assert.equal(audits.statusCode, 200, audits.body);

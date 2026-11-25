@@ -102,6 +102,13 @@ export type {
 } from "./attendance-payroll.port.ts";
 export type { StatutoryPayrollPort, StatutoryTableVersion } from "./statutory-payroll.port.ts";
 export type { AuditAppendPort, AuditEventDraft } from "./audit-append.port.ts";
+export { tenantExportTableNames } from "./tenant-export.port.ts";
+export type {
+  TenantExportFile,
+  TenantExportReadPort,
+  TenantExportTable,
+  TenantExportTableName,
+} from "./tenant-export.port.ts";
 export type { DomainActionCommand, DomainActionExecutor } from "./domain-action.port.ts";
 export { supportPiiRevealDeny, supportPiiRevealSetting } from "./support-grant-audit.port.ts";
 export type {

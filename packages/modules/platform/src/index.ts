@@ -9,6 +9,16 @@ export {
   withSupportSession,
 } from "./grants.ts";
 export type { ActivatedGrant, CreatedGrant, GrantScope } from "./grants.ts";
+export {
+  TENANT_EXPORT_QUEUE,
+  createTenantExport,
+  markTenantExportFailed,
+  processTenantExport,
+  readTenantExport,
+  tenantExportObjectKey,
+} from "./export-job.ts";
+export type { TenantExportDeps, TenantExportMessage, TenantExportStorage, TenantExportView } from "./export-job.ts";
+export { readStoredZip } from "./zip-stream.ts";
 export { migratePlatform } from "./migrate.ts";
 export type { PlatformMigrateInput } from "./migrate.ts";
 export { registerPlatform } from "./routes.ts";

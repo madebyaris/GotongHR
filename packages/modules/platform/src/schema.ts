@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   date,
+  bigint,
   integer,
   index,
   jsonb,
@@ -228,3 +229,16 @@ export const sysPlatformAuditEvents = pgTable(
   },
   (table) => [index("sys_platform_audit_events_created_at_idx").on(table.createdAt.desc())],
 );
+
+export const tenantExports = pgTable("tenant_exports", {
+  id: uuid("id").primaryKey().default(sql`uuidv7()`),
+  tenantId: uuid("tenant_id").notNull(),
+  requestedBy: uuid("requested_by").notNull(),
+  status: text("status").notNull().default("queued"),
+  storageKey: text("storage_key"),
+  byteSize: bigint("byte_size", { mode: "bigint" }),
+  errorCode: text("error_code"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+});

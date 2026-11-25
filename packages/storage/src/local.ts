@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, lstat, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { type FileHandle, access, lstat, mkdir, open, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -43,6 +43,15 @@ function envelope(reply: FastifyReply, status: number, code: string, message: st
 const STAGING_DIR_NAME = ".upload-partials";
 const partialUploadName = /^[0-9a-f]{32}\.partial$/;
 const MAX_PARTIAL_SWEEP = 200;
+
+async function writeAll(handle: FileHandle, bytes: Buffer): Promise<void> {
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const { bytesWritten } = await handle.write(bytes.subarray(offset));
+    if (bytesWritten <= 0) throw new Error("Object write stopped early.");
+    offset += bytesWritten;
+  }
+}
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -156,6 +165,37 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
         await rm(temporary, { force: true });
         throw error;
       }
+    },
+    async putStream(input) {
+      assertObjectKey(input.key);
+      if (input.contentType.trim().length === 0) {
+        throw new Error("Content type is required.");
+      }
+      const destination = resolveObjectPath(rootDir, input.key);
+      const staging = await ensureStagingDirectory(rootDir);
+      const temporary = path.join(staging, `${randomBytes(16).toString("hex")}.partial`);
+      await mkdir(path.dirname(destination), { recursive: true });
+      const handle = await open(temporary, "w");
+      let byteSize = 0;
+      try {
+        for await (const chunk of input.body) {
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          await writeAll(handle, bytes);
+          byteSize += bytes.byteLength;
+        }
+        await handle.close();
+      } catch (error) {
+        await handle.close().catch(() => undefined);
+        await rm(temporary, { force: true });
+        throw error;
+      }
+      try {
+        await rename(temporary, destination);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
+      return { byteSize };
     },
     async presignGet(input) {
       assertObjectKey(input.key);
