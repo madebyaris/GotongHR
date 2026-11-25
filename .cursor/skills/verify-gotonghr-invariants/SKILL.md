@@ -32,7 +32,7 @@ Each check records the commit where the model or the test last matched the code.
 
 - Tenant context or platform grants: `rls`.
 - `packages/payroll-engine/src/pph21`: `pph21`.
-- Payroll run status: `payroll_run`. Not in this tree yet.
+- Payroll run status: `payroll_run`.
 - `ai_action_proposals`: `hitl`.
 
 ## rls
@@ -90,9 +90,29 @@ That commit last changed `packages/payroll-engine/src/pph21` and the invariant a
 
 ## payroll_run
 
-Not implemented. Slice 4.5 has not landed, and `packages/modules/payroll` is not in this tree. Do not add a model that pretends the status machine exists.
+Model: `tooling/formal/payroll-run/PayrollRun.tla`.
 
-When that slice lands, add a TLA+ model of the status machine and read `/statechart` for it. The property text above stays as written.
+Config: `tooling/formal/payroll-run/PayrollRun.cfg`.
+
+View: `tooling/formal/payroll-run/PayrollRun.view.js`.
+
+Read `/statechart` and check that model. The property text above stays as written.
+
+`Calculate` moves `draft` to `calculated` and sets the money snapshot. `Approve` moves `calculated` to `approved`. `Finalize` moves `approved` to `finalized` and enqueues one PDF batch. `SecondFinalize` and `MutateAfterFinalize` leave status, money, and the batch count unchanged.
+
+Do not weaken `StatusOrder`, `MoneyFrozen`, or `SinglePdfBatch`.
+
+Sync commit: `0f68279a7e31b51e812be285ea6ed74f1493d1e1`.
+
+That commit added the model and `packages/modules/payroll`. Finalize updates a row only while its status is `approved`, then enqueues payslip jobs. A second finalize returns 409 and does not enqueue again. Item money and snapshots are rejected by `pay_run_items_immutable` after insert. Read the diff from this commit before you replace it. TLC on this model reported no error: 6 states generated, 4 distinct states, search depth 4.
+
+### Verification note
+
+The scratch edit was restored. The model is unchanged.
+
+TLC with `SecondFinalize` incrementing `pdfBatches` exited 12. `SinglePdfBatch` failed. State 5 is `SecondFinalize`. `status` is `finalized` and `pdfBatches` is 2. TLC had generated 5 states.
+
+`SecondFinalize` was restored to `UNCHANGED vars`. TLC then reported no error: 6 states generated, 4 distinct states, search depth 4.
 
 ## hitl
 
