@@ -14,13 +14,14 @@ RUN corepack pnpm install --frozen-lockfile --filter @gotonghr/web...
 COPY . .
 RUN corepack pnpm --filter @gotonghr/web... build
 
-# The pinned image has no caddy account. Create one before the chown copy.
+# The pinned image has no caddy account. Only Caddy's writable state is owned by
+# that user. The site and Caddyfile stay root-owned.
 FROM caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
 RUN addgroup -S -g 1000 caddy \
  && adduser -S -D -H -u 1000 -G caddy -g caddy -h /var/lib/caddy -s /sbin/nologin caddy \
- && mkdir -p /config/caddy /data/caddy /srv \
- && chown -R caddy:caddy /config /data /srv /etc/caddy \
- && chmod 755 /config /config/caddy /data /data/caddy /srv /etc/caddy
-COPY --chown=caddy:caddy docker/Caddyfile /etc/caddy/Caddyfile
-COPY --from=build --chown=caddy:caddy /repo/apps/web/dist /srv
+ && mkdir -p /config/caddy /data/caddy \
+ && chown -R caddy:caddy /config /data \
+ && chmod 755 /config /config/caddy /data /data/caddy
+COPY docker/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /repo/apps/web/dist /srv
 USER caddy

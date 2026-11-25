@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -39,41 +39,39 @@ function envelope(reply: FastifyReply, status: number, code: string, message: st
   });
 }
 
-const partialUploadName = /\.[0-9a-f]{16}\.partial$/;
+/** Outside the object-key namespace: keys must start with a letter or digit. */
+const STAGING_DIR_NAME = ".upload-partials";
+const partialUploadName = /^[0-9a-f]{32}\.partial$/;
 const MAX_PARTIAL_SWEEP = 200;
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
-/** Removes crash leftovers. A startup sweep only sees uploads that did not finish. */
+function stagingDirectory(rootDir: string): string {
+  return path.resolve(rootDir, STAGING_DIR_NAME);
+}
+
+/** Removes crash leftovers from the staging directory only. */
 async function sweepPartialUploads(rootDir: string): Promise<void> {
-  const root = path.resolve(rootDir);
+  const dir = stagingDirectory(rootDir);
+  let entries;
+  try {
+    const info = await lstat(dir);
+    if (!info.isDirectory()) return;
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (isMissing(error)) return;
+    throw error;
+  }
   let removed = 0;
-  const pending = [root];
-  while (pending.length > 0 && removed < MAX_PARTIAL_SWEEP) {
-    const dir = pending.pop();
-    if (!dir) break;
-    let entries;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch (error) {
-      if (isMissing(error)) continue;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (entry.name === "." || entry.name === "..") continue;
-      const resolved = path.resolve(dir, entry.name);
-      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) continue;
-      if (entry.isDirectory()) {
-        pending.push(resolved);
-        continue;
-      }
-      if (!entry.isFile() || !partialUploadName.test(entry.name)) continue;
-      await rm(resolved, { force: true });
-      removed += 1;
-      if (removed >= MAX_PARTIAL_SWEEP) break;
-    }
+  for (const entry of entries) {
+    if (removed >= MAX_PARTIAL_SWEEP) break;
+    if (!entry.isFile() || !partialUploadName.test(entry.name)) continue;
+    const resolved = path.resolve(dir, entry.name);
+    if (!resolved.startsWith(`${dir}${path.sep}`)) continue;
+    await rm(resolved, { force: true });
+    removed += 1;
   }
 }
 
@@ -136,7 +134,11 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
       await rm(resolveObjectPath(rootDir, input.key), { force: true });
     },
     async registerRoutes(app) {
-      await sweepPartialUploads(rootDir);
+      try {
+        await sweepPartialUploads(rootDir);
+      } catch (error) {
+        app.log.warn({ err: error }, "partial upload sweep failed");
+      }
       await app.register(async (scope) => {
         scope.removeAllContentTypeParsers();
         scope.addContentTypeParser(
@@ -165,7 +167,11 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
               return envelope(reply, 413, "too_large", `Upload exceeds ${claims.maxBytes} bytes.`);
             }
             const destination = resolveObjectPath(rootDir, claims.key);
-            const temporary = `${destination}.${randomBytes(8).toString("hex")}.partial`;
+            const temporary = path.join(
+              stagingDirectory(rootDir),
+              `${randomBytes(16).toString("hex")}.partial`,
+            );
+            await mkdir(stagingDirectory(rootDir), { recursive: true });
             await mkdir(path.dirname(destination), { recursive: true });
             try {
               await writeFile(temporary, body);

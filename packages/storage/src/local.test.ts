@@ -165,21 +165,37 @@ describe("local object storage", () => {
     await app.close();
   });
 
-  it("removes leftover partial uploads when routes register", async () => {
+  it("removes staged partials and leaves object keys alone", async () => {
     const directory = path.join(root, "tenant");
+    const staging = path.join(root, ".upload-partials");
     await mkdir(directory, { recursive: true });
+    await mkdir(staging, { recursive: true });
     const kept = path.join(directory, "kept.txt");
-    const partial = path.join(directory, "kept.txt.abcdabcdabcdabcd.partial");
+    const keyShaped = path.join(directory, "kept.txt.abcdabcdabcdabcdabcdabcdabcdabcd.partial");
     const namedPartial = path.join(directory, "notes.partial");
+    const staged = path.join(staging, `${"ab".repeat(16)}.partial`);
     await writeFile(kept, "kept");
-    await writeFile(partial, "orphan");
+    await writeFile(keyShaped, "user-data");
     await writeFile(namedPartial, "keep-me");
+    await writeFile(staged, "orphan");
     const storage = createLocalStorage({ rootDir: root, secret: "test-secret", urlPrefix: "" });
     const app = Fastify({ logger: false });
     await storage.registerRoutes(app);
-    await assert.rejects(stat(partial));
+    await assert.rejects(stat(staged));
     assert.equal(await readFile(kept, "utf8"), "kept");
+    assert.equal(await readFile(keyShaped, "utf8"), "user-data");
     assert.equal(await readFile(namedPartial, "utf8"), "keep-me");
+    await app.close();
+  });
+
+  it("registers routes when the partial sweep cannot read staging", async () => {
+    const blocked = path.join(root, "not-a-directory");
+    await writeFile(blocked, "x");
+    const storage = createLocalStorage({ rootDir: blocked, secret: "test-secret", urlPrefix: "" });
+    const app = Fastify({ logger: false });
+    await storage.registerRoutes(app);
+    const health = await app.inject({ method: "GET", url: "/storage/local/objects" });
+    assert.equal(health.statusCode, 403);
     await app.close();
   });
 });
