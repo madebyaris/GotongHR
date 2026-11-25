@@ -1,7 +1,13 @@
 import { registerAttendanceRoutes, registerClockRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor, PermissionAtom } from "@gotonghr/contracts";
-import { registerCoreHr, registerEmployeeDocuments, registerEmployeeImports } from "@gotonghr/core-hr";
+import {
+  registerContractExpiryJob,
+  registerCoreHr,
+  registerEmployeeDocuments,
+  registerEmployeeImports,
+  scanContractExpiry,
+} from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -108,6 +114,13 @@ export async function composeFromEnv(
       };
     };
     await registerIdentity(app, { auth, appDb, env });
+    await registerContractExpiryJob(boss, async (now) => {
+      await scanContractExpiry({
+        appDb,
+        queueUrl: requiredEnv(env, "DATABASE_URL_QUEUE"),
+        now,
+      });
+    });
     await registerCoreHr(app, { appDb, guard, readAuth });
     await registerEmployeeDocuments(app, { appDb, storage, guard, readAuth });
     await registerEmployeeImports(app, {

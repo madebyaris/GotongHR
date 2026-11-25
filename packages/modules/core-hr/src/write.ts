@@ -378,7 +378,19 @@ function rethrowEmployee(error: unknown): never {
     throw new EmployeeConflictError([{ field: "body", message: "That value is already used." }]);
   }
   if (code === "23503") {
-    throw new EmployeeFieldError([{ field: "branchId", message: "Choose a branch in this company." }]);
+    if (constraint.includes("department")) {
+      throw new EmployeeFieldError([{ field: "departmentId", message: "Choose a department in this company." }]);
+    }
+    if (constraint.includes("position")) {
+      throw new EmployeeFieldError([{ field: "positionId", message: "Choose a position in this company." }]);
+    }
+    if (constraint.includes("manager")) {
+      throw new EmployeeFieldError([{ field: "managerEmployeeId", message: "Choose a manager in this company." }]);
+    }
+    if (constraint.includes("branch")) {
+      throw new EmployeeFieldError([{ field: "branchId", message: "Choose a branch in this company." }]);
+    }
+    throw new EmployeeFieldError([{ field: "legalEntityId", message: "Choose a legal entity in this company." }]);
   }
   if (code === "23514") {
     throw new EmployeeFieldError([{ field: "body", message: "A value does not match the employee rules." }]);
