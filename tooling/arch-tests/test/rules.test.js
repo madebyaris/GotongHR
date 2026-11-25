@@ -10,8 +10,17 @@ test("architecture rules cover module boundaries", () => {
   assert.deepEqual(names, [
     "no-sibling-module-imports",
     "payroll-engine-stays-pure",
+    "payslip-pdf-stays-pure",
     "web-does-not-import-server",
   ]);
+  const payslip = config.forbidden.find((rule) => rule.name === "payslip-pdf-stays-pure");
+  assert.match(payslip.from.path, /payslip-pdf/);
+  assert.match(payslip.to.path, /puppeteer/);
+  assert.match(payslip.to.path, /playwright/);
+  assert.match(payslip.to.path, /drizzle-orm/);
+  assert.match(payslip.to.path, /(^|[|(])fastify([|)/])/);
+  assert.match(payslip.to.path, /(^|[|(])@fastify([|)/])/);
+  assert.match(payslip.to.path, /@gotonghr\/storage/);
   for (const rule of config.forbidden) {
     assert.equal(rule.severity, "error");
   }
