@@ -1,3 +1,4 @@
+import { registerAttendanceRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor } from "@gotonghr/contracts";
 import { registerCoreHr } from "@gotonghr/core-hr";
@@ -15,6 +16,8 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requireMember,
+  requireOrgWriter,
   requirePermission,
   type GotongAuth,
 } from "@gotonghr/identity";
@@ -101,6 +104,24 @@ export async function composeFromEnv(
           scopeBranchIds: auth.scopeBranchIds,
           directReportsOnly: auth.directReportsOnly,
           selfOnly: auth.selfOnly,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
+    });
+    await registerAttendanceRoutes(app, {
+      appDb,
+      adminGuard: requireOrgWriter(),
+      memberGuard: requireMember(),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
           ipAddress: request.ip || null,
           userAgent: typeof agent === "string" ? agent : null,
         };
