@@ -13,10 +13,13 @@ COPY packages/payslip-pdf/package.json packages/payslip-pdf/package.json
 COPY packages/crypto/package.json packages/crypto/package.json
 COPY packages/modules/identity/package.json packages/modules/identity/package.json
 COPY packages/modules/audit/package.json packages/modules/audit/package.json
+COPY packages/modules/platform/package.json packages/modules/platform/package.json
 COPY tooling/arch-tests/package.json tooling/arch-tests/package.json
 COPY tooling/eslint-config/package.json tooling/eslint-config/package.json
 RUN corepack pnpm install --frozen-lockfile --filter @gotonghr/web...
 COPY . .
+ARG VITE_DEPLOYMENT_MODE=single_tenant
+ENV VITE_DEPLOYMENT_MODE=$VITE_DEPLOYMENT_MODE
 RUN corepack pnpm --filter @gotonghr/web... build
 
 # The pinned image has no caddy account. Only Caddy's writable state is owned by

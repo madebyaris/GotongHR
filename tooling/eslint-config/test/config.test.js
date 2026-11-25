@@ -34,6 +34,8 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
 
   const modules = JSON.stringify(entry("packages/modules").rules["no-restricted-imports"]);
   assert.match(modules, /packages\/modules/);
+  assert.match(modules, /@gotonghr\/identity/);
+  assert.match(modules, /@gotonghr\/platform/);
 
   const payroll = restriction("packages/payroll-engine");
   assert.deepEqual(

@@ -9,7 +9,7 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test --test-reporter spec worker/*.test.ts",
+    "test": "node --test scripts/bundle-budget.test.mjs && node --experimental-strip-types --test --test-reporter spec worker/*.test.ts",
     "preview": "vite preview",
     "deploy": "pnpm typecheck && pnpm test && pnpm build && wrangler deploy"
   },

@@ -9,6 +9,8 @@ test("architecture rules cover module boundaries", () => {
   const names = config.forbidden.map((rule) => rule.name);
   assert.deepEqual(names, [
     "no-sibling-module-imports",
+    "platform-does-not-import-identity",
+    "identity-does-not-import-platform",
     "payroll-engine-stays-pure",
     "payslip-pdf-stays-pure",
     "web-does-not-import-server",

@@ -35,89 +35,93 @@ interface AuthSession {
   session: { id?: string; activeOrganizationId?: string };
 }
 
+type AuthChallenge = "totp_enrollment" | "totp_verification";
+
+export type AuthResult =
+  | { ok: true; context: GotongAuthContext }
+  | {
+      ok: false;
+      status: 400 | 401 | 403;
+      code: string;
+      message: string;
+      meta?: { challenge: AuthChallenge };
+    };
+
+interface AuthOptions {
+  permission?: PermissionAtom;
+  orgWrite?: boolean;
+}
+
 /**
- * Order: session, tenant header, permission, then TOTP for privileged payroll/PII.
+ * Order: session, suspended tenant, tenant header, permission, org write, then TOTP.
  * Scope flags are attached for later slices. Org routes filter rows by them.
  * Company setup is not a payroll or PII route, so it does not ask for TOTP.
+ * Support-grant writes pass `tenant.support_grant.write`, which requires TOTP.
  */
-export function requirePermission(atom: PermissionAtom) {
-  return requireAuth({ atom });
-}
-
-export function requireMember() {
-  return requireAuth({});
-}
-
-export function requireOrgWriter() {
-  return requireAuth({ orgWrite: true });
-}
-
-function requireAuth(options: { atom?: PermissionAtom; orgWrite?: boolean }) {
-  return async function authGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    const handle = request.server.gotongIdentity;
-    if (!handle) throw new Error("Identity plugin is not registered.");
-    const session = readSession(
-      await handle.auth.api.getSession({ headers: webHeaders(request.headers) }),
-    );
-    if (!session) {
-      await reply.code(401).send(fail("unauthenticated", "Sign in required."));
-      return;
+export async function authenticateRequest(
+  request: FastifyRequest,
+  options?: AuthOptions,
+): Promise<AuthResult> {
+  const handle = request.server.gotongIdentity;
+  if (!handle) throw new Error("Identity plugin is not registered.");
+  const session = readSession(
+    await handle.auth.api.getSession({ headers: webHeaders(request.headers) }),
+  );
+  if (!session) return denied(401, "unauthenticated", "Sign in required.");
+  const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
+  const header = tenantHeader(request.headers);
+  if (
+    typeof header === "string" &&
+    memberships.some((row) => row.tenantId.toLowerCase() === header && row.status === "suspended")
+  ) {
+    return denied(403, "tenant_suspended", "Tenant is suspended.");
+  }
+  if (memberships.length > 0 && memberships.every((row) => row.status === "suspended")) {
+    return denied(403, "tenant_suspended", "Tenant is suspended.");
+  }
+  const selected = selectMembership(
+    memberships.filter((row) => row.status === "active"),
+    header,
+    session.session.activeOrganizationId,
+  );
+  if (selected === "none") return denied(403, "no_membership", "No active membership.");
+  if (selected === "mismatch") {
+    return denied(403, "tenant_mismatch", "The tenant header does not match a membership.");
+  }
+  if (selected === "required") return denied(400, "tenant_required", "Choose a tenant.");
+  const permission = options?.permission;
+  if (permission && !selected.permissions.includes(permission)) {
+    return denied(403, "forbidden", "Missing permission.");
+  }
+  if (options?.orgWrite && !canWriteOrg(selected.role)) {
+    return denied(403, "forbidden", "Only an owner or HR admin can change the company.");
+  }
+  const twoFactorEnabled = session.user.twoFactorEnabled === true;
+  let sessionTotpVerified = false;
+  if (permission && permissionRequiresPrivilegedTotp(permission) && isPrivilegedRole(selected.role)) {
+    if (!twoFactorEnabled) {
+      return denied(
+        403,
+        "totp_enrollment_required",
+        "Set up an authenticator before using this route.",
+        { challenge: "totp_enrollment" },
+      );
     }
-    const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
-    const header = tenantHeader(request.headers);
-    const selected = selectMembership(memberships, header, session.session.activeOrganizationId);
-    if (selected === "none") {
-      await reply.code(403).send(fail("no_membership", "No active membership."));
-      return;
+    sessionTotpVerified = session.session.id
+      ? await sessionHasTotpVerification(handle.appDb, selected.tenantId, session.session.id)
+      : false;
+    if (!sessionTotpVerified) {
+      return denied(
+        403,
+        "totp_verification_required",
+        "Confirm this sign-in with an authenticator code.",
+        { challenge: "totp_verification" },
+      );
     }
-    if (selected === "mismatch") {
-      await reply.code(403).send(fail("tenant_mismatch", "The tenant header does not match a membership."));
-      return;
-    }
-    if (selected === "required") {
-      await reply.code(400).send(fail("tenant_required", "Choose a tenant."));
-      return;
-    }
-    if (options.atom && !selected.permissions.includes(options.atom)) {
-      await reply.code(403).send(fail("forbidden", "Missing permission."));
-      return;
-    }
-    if (options.orgWrite && !canWriteOrg(selected.role)) {
-      await reply.code(403).send(fail("forbidden", "Only an owner or HR admin can change the company."));
-      return;
-    }
-    const twoFactorEnabled = session.user.twoFactorEnabled === true;
-    let sessionTotpVerified = false;
-    if (
-      options.atom &&
-      permissionRequiresPrivilegedTotp(options.atom) &&
-      isPrivilegedRole(selected.role)
-    ) {
-      if (!twoFactorEnabled) {
-        await reply.code(403).send(
-          fail(
-            "totp_enrollment_required",
-            "Set up an authenticator before using this route.",
-            { challenge: "totp_enrollment" },
-          ),
-        );
-        return;
-      }
-      sessionTotpVerified = session.session.id
-        ? await sessionHasTotpVerification(handle.appDb, selected.tenantId, session.session.id)
-        : false;
-      if (!sessionTotpVerified) {
-        await reply.code(403).send(
-          fail(
-            "totp_verification_required",
-            "Confirm this sign-in with an authenticator code.",
-            { challenge: "totp_verification" },
-          ),
-        );
-        return;
-      }
-    }
-    request.gotongAuth = {
+  }
+  return {
+    ok: true,
+    context: {
       tenantId: selected.tenantId,
       organizationId: selected.organizationId,
       authUserId: selected.authUserId,
@@ -131,8 +135,56 @@ function requireAuth(options: { atom?: PermissionAtom; orgWrite?: boolean }) {
       selfOnly: selected.selfOnly,
       twoFactorEnabled,
       sessionTotpVerified,
-    };
+    },
   };
+}
+
+export function requireSession() {
+  return requireAuth({});
+}
+
+export function requirePermission(atom: PermissionAtom) {
+  return requireAuth({ permission: atom });
+}
+
+export function requireMember() {
+  return requireAuth({});
+}
+
+export function requireOrgWriter() {
+  return requireAuth({ orgWrite: true });
+}
+
+function requireAuth(options: AuthOptions) {
+  return async function authGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await sendAuthResult(request, reply, await authenticateRequest(request, options));
+  };
+}
+
+function denied(
+  status: 400 | 401 | 403,
+  code: string,
+  message: string,
+  meta?: { challenge: AuthChallenge },
+): AuthResult {
+  if (meta) return { ok: false, status, code, message, meta };
+  return { ok: false, status, code, message };
+}
+
+async function sendAuthResult(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  result: AuthResult,
+): Promise<void> {
+  if (result.ok) {
+    request.gotongAuth = result.context;
+    return;
+  }
+  if (result.meta) {
+    await reply.code(result.status).send(fail(result.code, result.message, result.meta));
+    return;
+  }
+  await reply.code(result.status).send(fail(result.code, result.message));
 }
 
 function selectMembership(
@@ -202,7 +254,10 @@ function readSession(value: unknown): AuthSession | null {
   if (sessionId) session.id = sessionId;
   if (activeOrganizationId) session.activeOrganizationId = activeOrganizationId;
   return {
-    user: twoFactorEnabled === undefined ? { id: record.user.id } : { id: record.user.id, twoFactorEnabled },
+    user:
+      twoFactorEnabled === undefined
+        ? { id: record.user.id }
+        : { id: record.user.id, twoFactorEnabled },
     session,
   };
 }

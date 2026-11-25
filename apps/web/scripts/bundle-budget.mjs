@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants } from "node:zlib";
@@ -7,6 +7,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const dist = path.join(appRoot, "dist");
 const ESS_CAP = 120 * 1024;
 const ADMIN_CAP = 180 * 1024;
+const PLATFORM_MARKER = "data-gotong-platform-console";
 
 function brotliSize(file) {
   const compressed = brotliCompressSync(readFileSync(file), {
@@ -72,47 +73,72 @@ function readDotenv(file) {
   return values;
 }
 
-const manifest = readManifest();
-const fileMode = {
-  ...readDotenv(path.join(appRoot, ".env")),
-  ...readDotenv(path.join(appRoot, ".env.local")),
-  ...readDotenv(path.join(appRoot, ".env.production")),
-  ...readDotenv(path.join(appRoot, ".env.production.local")),
-}.VITE_DEPLOYMENT_MODE;
-const mode = process.env.VITE_DEPLOYMENT_MODE ?? fileMode ?? "single_tenant";
-const multiTenant = mode === "multi_tenant_saas" || mode === "holding_multi_tenant";
-if (!multiTenant) {
-  const platform = Object.keys(manifest).filter((key) => key.includes("routes/platform"));
-  if (platform.length > 0) {
-    console.error(`build mode ${mode} includes the platform route: ${platform.join(", ")}`);
-    process.exit(1);
-  }
+export function platformMarkerHits(dir) {
+  return jsFiles(dir).filter((file) => readFileSync(file, "utf8").includes(PLATFORM_MARKER));
 }
 
-const ess = shellBytes(manifest, "routes/ess");
-const admin = shellBytes(manifest, "routes/admin");
-console.log(`ess brotli ${ess} bytes (cap ${ESS_CAP})`);
-console.log(`admin brotli ${admin} bytes (cap ${ADMIN_CAP})`);
-if (ess > ESS_CAP || admin > ADMIN_CAP) {
-  process.exit(1);
+function jsFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...jsFiles(full));
+    else if (entry.name.endsWith(".js")) out.push(full);
+  }
+  return out;
 }
 
-const headersFile = path.join(dist, "_headers");
-if (!existsSync(headersFile)) {
-  console.error("dist/_headers is missing. Cloudflare asset headers will not deploy.");
-  process.exit(1);
-}
-const headersText = readFileSync(headersFile, "utf8");
-const privatePaths = ["/api", "/api/auth/sign-in", "/auth", "/auth/sign-in"];
-for (const pathname of privatePaths) {
-  if (cacheControlFor(headersText, pathname) !== "private, no-store") {
-    console.error(`dist/_headers does not keep ${pathname} uncached.`);
+function main() {
+  const manifest = readManifest();
+  const fileMode = {
+    ...readDotenv(path.join(appRoot, ".env")),
+    ...readDotenv(path.join(appRoot, ".env.local")),
+    ...readDotenv(path.join(appRoot, ".env.production")),
+    ...readDotenv(path.join(appRoot, ".env.production.local")),
+  }.VITE_DEPLOYMENT_MODE;
+  const mode = process.env.VITE_DEPLOYMENT_MODE ?? fileMode ?? "single_tenant";
+  const multiTenant = mode === "multi_tenant_saas" || mode === "holding_multi_tenant";
+  const markerHits = platformMarkerHits(dist);
+  if (!multiTenant) {
+    const platform = Object.keys(manifest).filter((key) => key.includes("routes/platform"));
+    if (platform.length > 0) {
+      console.error(`build mode ${mode} includes the platform route: ${platform.join(", ")}`);
+      process.exit(1);
+    }
+    if (markerHits.length > 0) {
+      console.error(`build mode ${mode} includes the platform marker: ${markerHits.join(", ")}`);
+      process.exit(1);
+    }
+  } else if (markerHits.length === 0) {
+    console.error(`build mode ${mode} is missing the platform marker`);
     process.exit(1);
   }
-}
-if (cacheControlFor(headersText, "/assets/app-abc123.js") !== "public, max-age=31536000, immutable") {
-  console.error("dist/_headers does not set immutable caching on hashed assets.");
-  process.exit(1);
+
+  const ess = shellBytes(manifest, "routes/ess");
+  const admin = shellBytes(manifest, "routes/admin");
+  console.log(`ess brotli ${ess} bytes (cap ${ESS_CAP})`);
+  console.log(`admin brotli ${admin} bytes (cap ${ADMIN_CAP})`);
+  if (ess > ESS_CAP || admin > ADMIN_CAP) {
+    process.exit(1);
+  }
+
+  const headersFile = path.join(dist, "_headers");
+  if (!existsSync(headersFile)) {
+    console.error("dist/_headers is missing. Cloudflare asset headers will not deploy.");
+    process.exit(1);
+  }
+  const headersText = readFileSync(headersFile, "utf8");
+  const privatePaths = ["/api", "/api/auth/sign-in", "/auth", "/auth/sign-in"];
+  for (const pathname of privatePaths) {
+    if (cacheControlFor(headersText, pathname) !== "private, no-store") {
+      console.error(`dist/_headers does not keep ${pathname} uncached.`);
+      process.exit(1);
+    }
+  }
+  if (cacheControlFor(headersText, "/assets/app-abc123.js") !== "public, max-age=31536000, immutable") {
+    console.error("dist/_headers does not set immutable caching on hashed assets.");
+    process.exit(1);
+  }
 }
 
 function cacheControlFor(fileText, pathname) {
@@ -148,5 +174,14 @@ function headerPathMatches(pattern, pathname) {
   const star = pattern.indexOf("*");
   const prefix = pattern.slice(0, star);
   const suffix = pattern.slice(star + 1);
-  return pathname.startsWith(prefix) && pathname.endsWith(suffix) && pathname.length >= prefix.length + suffix.length;
+  return (
+    pathname.startsWith(prefix) &&
+    pathname.endsWith(suffix) &&
+    pathname.length >= prefix.length + suffix.length
+  );
 }
+
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (invokedDirectly) main();

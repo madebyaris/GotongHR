@@ -52,8 +52,10 @@ const essRoute = createRoute({
 
 const children: AnyRoute[] = [indexRoute, signInRoute, adminRoute, essRoute];
 
-const deploymentMode = import.meta.env.VITE_DEPLOYMENT_MODE;
-if (deploymentMode === "multi_tenant_saas" || deploymentMode === "holding_multi_tenant") {
+if (
+  import.meta.env.VITE_DEPLOYMENT_MODE === "multi_tenant_saas" ||
+  import.meta.env.VITE_DEPLOYMENT_MODE === "holding_multi_tenant"
+) {
   const PlatformPage = lazy(() => import("./routes/platform/index"));
   children.push(
     createRoute({

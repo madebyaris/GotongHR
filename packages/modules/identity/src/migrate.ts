@@ -482,6 +482,26 @@ const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [
     `,
   },
   {
+    signature: "id_tenant_access_for_auth_user(text)",
+    body: `
+      CREATE FUNCTION id_tenant_access_for_auth_user(p_auth_user_id text)
+      RETURNS TABLE (
+        tenant_id uuid,
+        status text
+      )
+      LANGUAGE sql
+      STABLE
+      SECURITY DEFINER
+      SET search_path = public
+      AS $$
+        SELECT t.id, t.status
+        FROM id_memberships m
+        JOIN id_tenants t ON t.id = m.tenant_id
+        WHERE m.auth_user_id = p_auth_user_id;
+      $$
+    `,
+  },
+  {
     signature: "id_memberships_for_auth_user(text)",
     body: `
       CREATE FUNCTION id_memberships_for_auth_user(p_auth_user_id text)
@@ -496,7 +516,8 @@ const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [
         scope_entity_ids uuid[],
         scope_branch_ids uuid[],
         direct_reports_only boolean,
-        self_only boolean
+        self_only boolean,
+        status text
       )
       LANGUAGE sql
       STABLE
@@ -514,13 +535,13 @@ const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [
           m.scope_entity_ids,
           m.scope_branch_ids,
           m.direct_reports_only,
-          m.self_only
+          m.self_only,
+          t.status
         FROM id_memberships m
         JOIN id_tenants t ON t.id = m.tenant_id
         JOIN id_users u ON u.id = m.user_id AND u.tenant_id = m.tenant_id
         JOIN id_roles r ON r.id = m.role_id AND r.tenant_id = m.tenant_id
-        WHERE m.auth_user_id = p_auth_user_id
-          AND t.status = 'active';
+        WHERE m.auth_user_id = p_auth_user_id;
       $$
     `,
   },

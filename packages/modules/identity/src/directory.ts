@@ -24,6 +24,7 @@ export interface MembershipRecord {
   scopeBranchIds: string[];
   directReportsOnly: boolean;
   selfOnly: boolean;
+  status: "active" | "suspended";
 }
 
 interface MembershipSqlRow {
@@ -38,6 +39,7 @@ interface MembershipSqlRow {
   scope_branch_ids: string[] | null;
   direct_reports_only: boolean;
   self_only: boolean;
+  status: string;
 }
 
 export interface TenantOwnerRow {
@@ -80,7 +82,36 @@ export async function singleTenantOwner(pool: pg.Pool): Promise<TenantOwnerRow |
   };
 }
 
-/** Pass the session user id. This function can see every tenant that user belongs to. */
+export interface TenantAccess {
+  tenantId: string;
+  status: "active" | "suspended";
+}
+
+/**
+ * Every membership status. Sign-in uses this before a session exists.
+ * Authenticated requests read status from `membershipsForAuthUser`.
+ */
+export async function tenantAccessForAuthUser(
+  pool: pg.Pool,
+  authUserId: string,
+): Promise<TenantAccess[]> {
+  const result = await pool.query<{ tenant_id: string; status: string }>(
+    "SELECT tenant_id, status FROM id_tenant_access_for_auth_user($1)",
+    [authUserId],
+  );
+  return result.rows.flatMap((row) => {
+    if (row.status !== "active" && row.status !== "suspended") return [];
+    return [{ tenantId: row.tenant_id, status: row.status }];
+  });
+}
+
+/** True when the user has a membership and every one of those tenants is suspended. */
+export async function userIsSuspended(pool: pg.Pool, authUserId: string): Promise<boolean> {
+  const access = await tenantAccessForAuthUser(pool, authUserId);
+  return access.length > 0 && access.every((row) => row.status === "suspended");
+}
+
+/** Every membership for this user, including a suspended tenant. */
 export async function membershipsForAuthUser(
   pool: pg.Pool,
   authUserId: string,
@@ -89,19 +120,25 @@ export async function membershipsForAuthUser(
     "SELECT * FROM id_memberships_for_auth_user($1)",
     [authUserId],
   );
-  return result.rows.map((row) => ({
-    tenantId: row.tenant_id,
-    organizationId: row.organization_id,
-    authUserId: row.auth_user_id,
-    userId: row.user_id,
-    email: row.email,
-    role: row.role_code,
-    permissions: (row.permissions ?? []).filter(isPermissionAtom),
-    scopeEntityIds: row.scope_entity_ids ?? [],
-    scopeBranchIds: row.scope_branch_ids ?? [],
-    directReportsOnly: row.direct_reports_only,
-    selfOnly: row.self_only,
-  }));
+  return result.rows.flatMap((row) => {
+    if (row.status !== "active" && row.status !== "suspended") return [];
+    return [
+      {
+        tenantId: row.tenant_id,
+        organizationId: row.organization_id,
+        authUserId: row.auth_user_id,
+        userId: row.user_id,
+        email: row.email,
+        role: row.role_code,
+        permissions: (row.permissions ?? []).filter(isPermissionAtom),
+        scopeEntityIds: row.scope_entity_ids ?? [],
+        scopeBranchIds: row.scope_branch_ids ?? [],
+        directReportsOnly: row.direct_reports_only,
+        selfOnly: row.self_only,
+        status: row.status,
+      },
+    ];
+  });
 }
 
 export async function assertCanCreateOrganization(
@@ -214,6 +251,7 @@ export async function recordSession(
   const totpVerified = options?.totpVerified === true;
   const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
   for (const membership of memberships) {
+    if (membership.status !== "active") continue;
     await appDb.withTenantContext(membership.tenantId, async (tx) => {
       await tx.execute(sql`
         INSERT INTO id_sessions (
@@ -241,6 +279,7 @@ export async function markSessionTotpVerified(
 ): Promise<void> {
   const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
   for (const membership of memberships) {
+    if (membership.status !== "active") continue;
     await appDb.withTenantContext(membership.tenantId, async (tx) => {
       await tx.execute(sql`
         UPDATE id_sessions
@@ -273,6 +312,7 @@ async function revokeOtherAuthSessions(
 ): Promise<void> {
   const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
   for (const membership of memberships) {
+    if (membership.status !== "active") continue;
     await appDb.withTenantContext(membership.tenantId, async (tx) => {
       await tx.execute(sql`
         DELETE FROM id_sessions

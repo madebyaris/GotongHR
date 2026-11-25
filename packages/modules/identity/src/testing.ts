@@ -25,6 +25,7 @@ export async function resetIdentity(): Promise<void> {
         ba_verification,
         ba_organization,
         ba_user
+      CASCADE
     `);
   } finally {
     await admin.end();
