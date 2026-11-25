@@ -69,7 +69,12 @@ test("built-in roles keep finalize and PII off the employee", () => {
     "it_security_admin",
   ]);
   assert.equal(roleHasPermission("employee", "employee.pii.read"), false);
+  assert.equal(roleHasPermission("branch_manager", "employee.pii.read"), false);
+  assert.equal(roleHasPermission("branch_manager", "attendance.approve"), true);
   assert.equal(roleHasPermission("org_owner", "payroll.run.finalize"), true);
+  assert.equal(roleHasPermission("org_owner", "payroll.run.prepare"), false);
+  assert.equal(roleHasPermission("org_owner", "payroll.run.create"), false);
+  assert.equal(roleHasPermission("hr_admin", "payroll.run.prepare"), true);
   assert.equal(roleHasPermission("hr_admin", "payroll.run.finalize"), false);
   assert.equal(roleHasPermission("payroll_admin", "payroll.run.finalize"), false);
   assert.deepEqual(rolePermissions.finance_viewer, ["audit.log.read"]);

@@ -1,4 +1,4 @@
-import { permissionAtoms, type PermissionAtom } from "./permissions.ts";
+import { type PermissionAtom } from "./permissions.ts";
 
 /**
  * Built-in membership roles. Better Auth's organization roles are not these.
@@ -60,11 +60,26 @@ export const roleScopeDefaults: Record<RoleCode, RoleScopeDefault> = {
 };
 
 /**
- * `payroll.run.finalize` stays with `org_owner` so the preparer is not the
- * finalizer. Employee ESS has no admin atoms.
+ * Seed copied into `id_roles` when a tenant is created. The request guard
+ * checks that stored array. Changing this map does not update an existing
+ * tenant, and `roleHasPermission` reads the seed, so it can disagree with a
+ * row that was edited later.
+ *
+ * `org_owner` may finalize a payroll run and may not prepare or create one.
+ * `hr_admin` and `payroll_admin` prepare. The preparer is not the finalizer.
+ * `branch_manager` does not receive `employee.pii.read` until branch row
+ * scoping exists (Slice 2.x). This slice does not filter rows by scope.
  */
 export const rolePermissions = {
-  org_owner: permissionAtoms,
+  org_owner: [
+    "employee.pii.read",
+    "employee.pii.reveal",
+    "attendance.approve",
+    "payroll.run.finalize",
+    "payroll.coretax.export",
+    "ai.action.approve",
+    "audit.log.read",
+  ],
   hr_admin: [
     "employee.pii.read",
     "employee.pii.reveal",
@@ -80,7 +95,7 @@ export const rolePermissions = {
     "payroll.coretax.export",
   ],
   finance_viewer: ["audit.log.read"],
-  branch_manager: ["employee.pii.read", "attendance.approve"],
+  branch_manager: ["attendance.approve"],
   line_manager: ["attendance.approve"],
   employee: [],
   it_security_admin: ["audit.log.read", "employee.pii.read"],

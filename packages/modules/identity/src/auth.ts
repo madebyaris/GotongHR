@@ -1,17 +1,22 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { TenantDatabase } from "@gotonghr/db";
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { organization, twoFactor } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sessionCookieAttributes } from "./cookies.ts";
 import {
   assertCanCreateOrganization,
+  markSessionTotpVerified,
   provisionDirectory,
   recordSession,
 } from "./directory.ts";
-import { readAuthBaseUrl, readAuthSecret, readDeploymentMode } from "./env.ts";
+import { readAuthSecret, readDeploymentMode, readTrustedOrigins } from "./env.ts";
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "./password.ts";
 import { authSchema } from "./schema.ts";
+
+const totpVerification = new AsyncLocalStorage<true>();
 
 export interface CreateAuthInput {
   appDb: TenantDatabase;
@@ -26,14 +31,17 @@ export interface GotongAuth {
     }) => Promise<{ id: string } | null | undefined>;
   };
   readonly $context: Promise<{
-    password: { hash: (password: string) => Promise<string> };
+    password: {
+      hash: (password: string) => Promise<string>;
+      verify: (data: { hash: string; password: string }) => Promise<boolean>;
+    };
     internalAdapter: {
       findUserByEmail: (
         email: string,
         options?: { includeAccounts: true },
       ) => Promise<{
         user: { id: string; email: string };
-        accounts: Array<{ providerId: string }>;
+        accounts: Array<{ providerId: string; password?: string | null }>;
       } | null>;
       createUser: (
         user: { email: string; name: string; emailVerified: true },
@@ -52,7 +60,9 @@ export interface GotongAuth {
 export function createAuth(input: CreateAuthInput): GotongAuth {
   const env = input.env ?? process.env;
   const secret = readAuthSecret(env);
-  const baseURL = readAuthBaseUrl(env);
+  const trustedOrigins = readTrustedOrigins(env);
+  const baseURL = trustedOrigins[0];
+  if (!baseURL) throw new Error("Missing BETTER_AUTH_URL.");
   const deploymentMode = readDeploymentMode(env);
   const authDb = drizzle(input.appDb.pool, { schema: authSchema });
 
@@ -60,7 +70,7 @@ export function createAuth(input: CreateAuthInput): GotongAuth {
     appName: "GotongHR",
     baseURL,
     secret,
-    trustedOrigins: [baseURL],
+    trustedOrigins,
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
@@ -107,11 +117,27 @@ export function createAuth(input: CreateAuthInput): GotongAuth {
     databaseHooks: {
       session: {
         create: {
-          after: async (session) => {
-            await recordSession(input.appDb, session);
+          after: async (session, context) => {
+            const totpVerified =
+              totpVerification.getStore() === true || isTotpVerificationPath(endpointPath(context));
+            await recordSession(input.appDb, session, { totpVerified });
           },
         },
       },
+    },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (isTotpVerificationPath(ctx.path ?? "")) totpVerification.enterWith(true);
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        if (!isTotpVerificationPath(ctx.path ?? "")) return;
+        if (!isSuccessfulAuthResult(ctx.context.returned)) return;
+        const current = ctx.context.session?.session;
+        const authUserId = current?.userId;
+        const authSessionId = current?.id;
+        if (!authUserId || !authSessionId) return;
+        await markSessionTotpVerified(input.appDb, authUserId, authSessionId);
+      }),
     },
     advanced: {
       useSecureCookies: true,
@@ -135,4 +161,22 @@ export function createAuth(input: CreateAuthInput): GotongAuth {
     // The inferred Better Auth type names a nested Zod path that declaration
     // emit cannot reference. Callers use this structural type instead.
   }) as unknown as GotongAuth;
+}
+
+function endpointPath(context: object | null): string {
+  if (!context || !("path" in context)) return "";
+  const path = context.path;
+  return typeof path === "string" ? path : "";
+}
+
+function isTotpVerificationPath(path: string): boolean {
+  return path.endsWith("/two-factor/verify-totp") || path.endsWith("/two-factor/verify-backup-code");
+}
+
+function isSuccessfulAuthResult(returned: unknown): boolean {
+  if (returned == null || typeof returned !== "object") return false;
+  if ("statusCode" in returned && typeof returned.statusCode === "number" && returned.statusCode >= 400) {
+    return false;
+  }
+  return true;
 }

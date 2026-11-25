@@ -15,7 +15,13 @@ import { sql } from "drizzle-orm";
 import Fastify, { type FastifyInstance, type LightMyRequestResponse } from "fastify";
 import pg from "pg";
 import { createAuth, type GotongAuth } from "./auth.ts";
-import { bootstrapOwner, createTenantWithOwner, grantMembership, tenantSlug } from "./bootstrap.ts";
+import {
+  bootstrapOwner,
+  createTenantWithOwner,
+  ensureCredentialUser,
+  grantMembership,
+  tenantSlug,
+} from "./bootstrap.ts";
 import { TENANT_HEADER, requirePermission } from "./guard.ts";
 import { migrateIdentity } from "./migrate.ts";
 import { registerIdentity } from "./plugin.ts";
@@ -241,6 +247,25 @@ describe("identity auth", { concurrency: 1 }, () => {
     const allowed = await getProbe(app, nextCookie);
     assert.equal(allowed.statusCode, 200, allowed.body);
     assert.equal(probe.hits, 1);
+
+    const stale = await getProbe(app, ownerCookie);
+    assert.notEqual(stale.statusCode, 200);
+    assert.equal(probe.hits, 1);
+
+    await superuserQuery("UPDATE id_sessions SET totp_verified_at = NULL WHERE auth_user_id = $1", [
+      authUserId,
+    ]);
+    const wrongCode = await postAuth(
+      app,
+      "/api/auth/two-factor/verify-totp",
+      { code: "000000" },
+      nextCookie,
+    );
+    assert.notEqual(wrongCode.statusCode, 200);
+    const unverified = await getProbe(app, nextCookie);
+    assert.equal(unverified.statusCode, 403);
+    assert.equal(readError(unverified), "totp_verification_required");
+    assert.equal(probe.hits, 1);
     const afterVerify = await superuserQuery<{ two_factor_enabled: boolean | null }>(
       "SELECT two_factor_enabled FROM ba_user WHERE email = $1",
       [ownerEmail],
@@ -283,6 +308,17 @@ describe("identity auth", { concurrency: 1 }, () => {
       assert.equal(resetStatuses[3], 429);
       assert.equal(resetStatuses.slice(0, 3).every((status) => status !== 429), true);
 
+      await appDb.pool.query("DELETE FROM id_rate_limits");
+      const totpStatuses: number[] = [];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const response = await postAuth(limited, "/api/auth/two-factor/verify-totp", {
+          code: "000000",
+        });
+        totpStatuses.push(response.statusCode);
+      }
+      assert.equal(totpStatuses[3], 429);
+      assert.equal(totpStatuses.slice(0, 3).every((status) => status !== 429), true);
+
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const health = await limited.inject({ method: "GET", url: "/healthz" });
         assert.equal(health.statusCode, 200);
@@ -296,6 +332,20 @@ describe("identity auth", { concurrency: 1 }, () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/platform/tenants" });
     assert.equal(response.statusCode, 404);
     assert.equal(tenantSlug("GotongHR"), "gotonghr");
+    assert.match(tenantSlug("東京"), /^tenant-[0-9a-f]{8}$/u);
+    const longA = tenantSlug(`${"a".repeat(80)}x`);
+    const longB = tenantSlug(`${"a".repeat(80)}y`);
+    assert.equal(longA.length, 64);
+    assert.notEqual(longA, longB);
+    await assert.rejects(
+      () =>
+        ensureCredentialUser(auth, {
+          email: employeeEmail,
+          password: "not-the-employee",
+          name: "Employee",
+        }),
+      /Password does not match/,
+    );
   });
 
   it("keeps tenant rows behind FORCE RLS and the resolver functions", async () => {
@@ -367,6 +417,62 @@ describe("identity auth", { concurrency: 1 }, () => {
     assert.equal(byName.get("id_memberships")?.relforcerowsecurity, true);
     assert.equal(byName.get("ba_user")?.relrowsecurity, false);
     assert.equal(byName.get("id_rate_limits")?.relrowsecurity, false);
+    const privileges = await superuserQuery<{
+      platform_select: boolean;
+      queue_select: boolean;
+      platform_insert: boolean;
+    }>(
+      `SELECT
+         has_table_privilege('platform_admin', 'ba_user', 'SELECT') AS platform_select,
+         has_table_privilege('gotong_queue', 'ba_user', 'SELECT') AS queue_select,
+         has_table_privilege('platform_admin', 'ba_session', 'INSERT') AS platform_insert`,
+      [],
+    );
+    assert.equal(privileges[0]?.platform_select, false);
+    assert.equal(privileges[0]?.queue_select, false);
+    assert.equal(privileges[0]?.platform_insert, false);
+
+    await grantMembership(multi, appDb, {
+      tenantId: tenantB.tenantId,
+      email: "a-owner@gotonghr.test",
+      password: ownerPassword,
+      name: "A Owner",
+      role: "hr_admin",
+    });
+    const signedIn = await signIn(app, "a-owner@gotonghr.test", ownerPassword);
+    assert.equal(signedIn.statusCode, 200, signedIn.body);
+    probe.hits = 0;
+    const switched = await getProbe(app, cookieHeader(setCookies(signedIn)), tenantB.tenantId);
+    assert.equal(switched.statusCode, 403);
+    assert.equal(readError(switched), "tenant_mismatch");
+    assert.equal(probe.hits, 0);
+  });
+
+  it("serializes overlapping single-tenant bootstraps", async () => {
+    await resetIdentity();
+    const attempts = await Promise.allSettled([
+      bootstrapOwner(
+        auth,
+        appDb,
+        { email: "race-a@gotonghr.test", password: ownerPassword, name: "A", tenantName: "Race A" },
+        "single_tenant",
+      ),
+      bootstrapOwner(
+        auth,
+        appDb,
+        { email: "race-b@gotonghr.test", password: ownerPassword, name: "B", tenantName: "Race B" },
+        "single_tenant",
+      ),
+    ]);
+    const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const rejected = attempts.filter((attempt) => attempt.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    const failure = rejected[0];
+    assert.ok(failure);
+    assert.equal(failure.status, "rejected");
+    assert.ok(failure.reason instanceof SingleTenantOccupiedError);
+    assert.equal(await tenantCount(appDb.pool), 1);
   });
 });
 

@@ -5,7 +5,11 @@ import {
   type PermissionAtom,
 } from "@gotonghr/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { membershipsForAuthUser, type MembershipRecord } from "./directory.ts";
+import {
+  membershipsForAuthUser,
+  sessionHasTotpVerification,
+  type MembershipRecord,
+} from "./directory.ts";
 
 export const TENANT_HEADER = "x-gotong-tenant-id";
 
@@ -22,11 +26,12 @@ export interface GotongAuthContext {
   directReportsOnly: boolean;
   selfOnly: boolean;
   twoFactorEnabled: boolean;
+  sessionTotpVerified: boolean;
 }
 
 interface AuthSession {
   user: { id: string; twoFactorEnabled?: boolean };
-  session: { activeOrganizationId?: string };
+  session: { id?: string; activeOrganizationId?: string };
 }
 
 /**
@@ -67,19 +72,31 @@ export function requirePermission(atom: PermissionAtom) {
       return;
     }
     const twoFactorEnabled = session.user.twoFactorEnabled === true;
-    if (
-      permissionRequiresPrivilegedTotp(atom) &&
-      isPrivilegedRole(selected.role) &&
-      !twoFactorEnabled
-    ) {
-      await reply.code(403).send(
-        fail(
-          "totp_enrollment_required",
-          "Set up an authenticator before using this route.",
-          { challenge: "totp_enrollment" },
-        ),
-      );
-      return;
+    let sessionTotpVerified = false;
+    if (permissionRequiresPrivilegedTotp(atom) && isPrivilegedRole(selected.role)) {
+      if (!twoFactorEnabled) {
+        await reply.code(403).send(
+          fail(
+            "totp_enrollment_required",
+            "Set up an authenticator before using this route.",
+            { challenge: "totp_enrollment" },
+          ),
+        );
+        return;
+      }
+      sessionTotpVerified = session.session.id
+        ? await sessionHasTotpVerification(handle.appDb, selected.tenantId, session.session.id)
+        : false;
+      if (!sessionTotpVerified) {
+        await reply.code(403).send(
+          fail(
+            "totp_verification_required",
+            "Confirm this sign-in with an authenticator code.",
+            { challenge: "totp_verification" },
+          ),
+        );
+        return;
+      }
     }
     request.gotongAuth = {
       tenantId: selected.tenantId,
@@ -94,6 +111,7 @@ export function requirePermission(atom: PermissionAtom) {
       directReportsOnly: selected.directReportsOnly,
       selfOnly: selected.selfOnly,
       twoFactorEnabled,
+      sessionTotpVerified,
     };
   };
 }
@@ -105,10 +123,20 @@ function selectMembership(
 ): MembershipRecord | "none" | "mismatch" | "required" {
   if (memberships.length === 0) return "none";
   if (header === "invalid") return "mismatch";
-  if (header) {
-    return memberships.find((membership) => membership.tenantId === header) ?? "mismatch";
+  const resolved = resolveActiveMembership(memberships, activeOrganizationId);
+  if (resolved === "required") {
+    // A header must not pick a tenant the session has not already resolved.
+    return header ? "mismatch" : "required";
   }
-  if (memberships.length === 1) return memberships[0] ?? "none";
+  if (header && header !== resolved.tenantId) return "mismatch";
+  return resolved;
+}
+
+function resolveActiveMembership(
+  memberships: readonly MembershipRecord[],
+  activeOrganizationId: string | undefined,
+): MembershipRecord | "required" {
+  if (memberships.length === 1) return memberships[0] ?? "required";
   if (activeOrganizationId) {
     const matches = memberships.filter(
       (membership) => membership.organizationId === activeOrganizationId,
@@ -141,17 +169,21 @@ function readSession(value: unknown): AuthSession | null {
   if (!value || typeof value !== "object") return null;
   const record = value as {
     user?: { id?: unknown; twoFactorEnabled?: unknown };
-    session?: { activeOrganizationId?: unknown };
+    session?: { id?: unknown; activeOrganizationId?: unknown };
   };
   if (!record.user || typeof record.user.id !== "string") return null;
   const twoFactorEnabled =
     typeof record.user.twoFactorEnabled === "boolean" ? record.user.twoFactorEnabled : undefined;
+  const sessionId = typeof record.session?.id === "string" ? record.session.id : undefined;
   const activeOrganizationId =
     typeof record.session?.activeOrganizationId === "string"
       ? record.session.activeOrganizationId
       : undefined;
+  const session: AuthSession["session"] = {};
+  if (sessionId) session.id = sessionId;
+  if (activeOrganizationId) session.activeOrganizationId = activeOrganizationId;
   return {
     user: twoFactorEnabled === undefined ? { id: record.user.id } : { id: record.user.id, twoFactorEnabled },
-    session: activeOrganizationId === undefined ? {} : { activeOrganizationId },
+    session,
   };
 }

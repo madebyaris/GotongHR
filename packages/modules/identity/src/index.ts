@@ -1,12 +1,6 @@
 export { createAuth } from "./auth.ts";
 export type { CreateAuthInput, GotongAuth } from "./auth.ts";
-export {
-  bootstrapOwner,
-  createTenantWithOwner,
-  ensureCredentialUser,
-  grantMembership,
-  tenantSlug,
-} from "./bootstrap.ts";
+export { bootstrapOwner, ensureCredentialUser, grantMembership, tenantSlug } from "./bootstrap.ts";
 export type { BootstrapResult, CredentialUserInput } from "./bootstrap.ts";
 export { sessionCookieAttributes } from "./cookies.ts";
 export { membershipsForAuthUser, tenantCount } from "./directory.ts";
@@ -18,6 +12,9 @@ export {
   readAuthSecret,
   readBootstrapInput,
   readDeploymentMode,
+  readTrustCloudflare,
+  readTrustProxy,
+  readTrustedOrigins,
 } from "./env.ts";
 export type { BootstrapInput, DeploymentMode } from "./env.ts";
 export { SingleTenantOccupiedError } from "./errors.ts";

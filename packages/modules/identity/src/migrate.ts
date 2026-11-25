@@ -60,8 +60,9 @@ export async function migrateIdentity(input: IdentityMigrateInput): Promise<void
   const admin = new Client({ connectionString: input.superuserUrl });
   await admin.connect();
   try {
-    await admin.query("BEGIN");
+      await admin.query("BEGIN");
     try {
+      await admin.query(superuserRepairSql);
       for (const fn of resolverFunctions) {
         await admin.query(`DROP FUNCTION IF EXISTS ${fn.signature}`);
         await admin.query(fn.body);
@@ -100,11 +101,15 @@ CREATE POLICY id_tenants_tenant_isolation ON id_tenants
 `;
 
 /**
- * ba_* tables have no RLS. Sign-in reads them before a tenant is known, and
- * Better Auth checks out a pool connection that is not inside withTenantContext,
- * so a tenant GUC would not be visible to those queries. Tenant HR data is the
- * id_* tables, which use FORCE RLS. id_rate_limits is also global: a login
- * limit is counted before the session has a tenant.
+ * ba_* holds Better Auth state that is read before a tenant is known: the
+ * credential, the session, and the TOTP secret. Better Auth checks out a pool
+ * connection that is not inside withTenantContext, so a tenant GUC is not
+ * visible there. Those tables have no RLS. app_tenant is the only request
+ * role that can read or write them. platform_admin and gotong_queue are
+ * revoked. Tenant HR data stays on id_*, which use FORCE RLS
+ * (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid).
+ * id_rate_limits is global because a login is counted before the session
+ * has a tenant.
  *
  * id_memberships_for_auth_user is SECURITY DEFINER and owned by the superuser
  * so the request role can resolve a membership without BYPASSRLS. It is static
@@ -205,7 +210,7 @@ CREATE TABLE IF NOT EXISTS ba_two_factor (
 
 CREATE TABLE IF NOT EXISTS id_tenants (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
-  organization_id text NOT NULL UNIQUE,
+  organization_id text NOT NULL UNIQUE REFERENCES ba_organization (id) ON DELETE RESTRICT,
   name text NOT NULL,
   slug text NOT NULL UNIQUE,
   status text NOT NULL DEFAULT 'active',
@@ -256,13 +261,15 @@ CREATE INDEX IF NOT EXISTS id_memberships_auth_user_id_idx ON id_memberships (au
 CREATE TABLE IF NOT EXISTS id_sessions (
   id uuid PRIMARY KEY DEFAULT uuidv7(),
   tenant_id uuid NOT NULL REFERENCES id_tenants (id) ON DELETE CASCADE,
-  auth_session_id text NOT NULL,
+  auth_session_id text NOT NULL REFERENCES ba_session (id) ON DELETE CASCADE,
   auth_user_id text NOT NULL,
   user_id uuid NOT NULL,
+  totp_verified_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, auth_session_id),
   FOREIGN KEY (user_id, tenant_id) REFERENCES id_users (id, tenant_id)
 );
+ALTER TABLE id_sessions ADD COLUMN IF NOT EXISTS totp_verified_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS id_rate_limits (
   key text PRIMARY KEY,
@@ -270,9 +277,67 @@ CREATE TABLE IF NOT EXISTS id_rate_limits (
   expires_at timestamptz NOT NULL
 );
 
-COMMENT ON TABLE ba_user IS 'Better Auth credentials. No RLS: sign-in runs before a tenant is known.';
+COMMENT ON TABLE ba_user IS 'Better Auth credentials and TOTP. No RLS: sign-in runs before a tenant is known. platform_admin and gotong_queue have no privileges. Tenant rows live in id_* under FORCE RLS.';
 COMMENT ON TABLE id_rate_limits IS 'Login and password-reset counters. Not tenant data.';
 COMMENT ON TABLE id_tenants IS 'One row per Better Auth organization. Isolation predicate is id, not tenant_id.';
+`;
+
+/**
+ * Existing databases created before these foreign keys need the constraints
+ * added, and orphan rows would reject the ADD. The superuser bypasses FORCE
+ * RLS, so it can see every tenant row. The trigger deletes id_sessions as the
+ * superuser: a direct ba_session delete from app_tenant would otherwise be
+ * blocked by FORCE RLS on the cascade.
+ */
+const superuserRepairSql = `
+DELETE FROM id_sessions AS s
+WHERE NOT EXISTS (SELECT 1 FROM ba_session AS b WHERE b.id = s.auth_session_id);
+
+DELETE FROM id_tenants AS t
+WHERE NOT EXISTS (SELECT 1 FROM ba_organization AS o WHERE o.id = t.organization_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'id_tenants_organization_id_fkey'
+  ) THEN
+    ALTER TABLE id_tenants
+      ADD CONSTRAINT id_tenants_organization_id_fkey
+      FOREIGN KEY (organization_id) REFERENCES ba_organization (id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'id_sessions_auth_session_id_fkey'
+  ) THEN
+    ALTER TABLE id_sessions
+      ADD CONSTRAINT id_sessions_auth_session_id_fkey
+      FOREIGN KEY (auth_session_id) REFERENCES ba_session (id) ON DELETE CASCADE;
+  END IF;
+END $$;
+
+DROP TRIGGER IF EXISTS ba_session_delete_id_sessions ON ba_session;
+DROP FUNCTION IF EXISTS id_delete_sessions_for_auth_session();
+
+CREATE FUNCTION id_delete_sessions_for_auth_session()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  DELETE FROM id_sessions WHERE auth_session_id = OLD.id;
+  RETURN OLD;
+END;
+$$;
+
+CREATE TRIGGER ba_session_delete_id_sessions
+  BEFORE DELETE ON ba_session
+  FOR EACH ROW
+  EXECUTE FUNCTION id_delete_sessions_for_auth_session();
+
+REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM PUBLIC;
+REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM ${PLATFORM_ROLE};
+REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM ${QUEUE_ROLE};
+GRANT EXECUTE ON FUNCTION id_delete_sessions_for_auth_session() TO ${APP_ROLE};
 `;
 
 const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [

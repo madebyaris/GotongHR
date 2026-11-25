@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import type { RoleCode } from "@gotonghr/contracts";
 import type { TenantDatabase } from "@gotonghr/db";
+import pg from "pg";
 import type { GotongAuth } from "./auth.ts";
 import {
   insertMembership,
@@ -9,7 +11,10 @@ import {
 } from "./directory.ts";
 import { normalizeEmail, type DeploymentMode } from "./env.ts";
 import { SingleTenantOccupiedError } from "./errors.ts";
-import { MIN_PASSWORD_LENGTH } from "./password.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password.ts";
+
+const SINGLE_TENANT_LOCK = "gotonghr.single_tenant.bootstrap";
+const SLUG_MAX = 64;
 
 export interface BootstrapResult {
   tenantId: string;
@@ -65,21 +70,30 @@ export async function bootstrapOwner(
     throw new Error("bootstrap is only available when GOTONG_DEPLOYMENT_MODE=single_tenant");
   }
   const email = normalizeEmail(input.email);
-  const count = await tenantCount(appDb.pool);
-  if (count > 1) throw new SingleTenantOccupiedError();
-  if (count === 1) {
-    const owner = await singleTenantOwner(appDb.pool);
-    if (!owner) throw new Error("single_tenant has a tenant without an org_owner.");
-    if (normalizeEmail(owner.email) !== email) throw new SingleTenantOccupiedError();
-    return {
-      tenantId: owner.tenantId,
-      organizationId: owner.organizationId,
-      authUserId: owner.authUserId,
-      created: false,
-    };
+  const client = await connectOutsidePool(appDb);
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext($1)::bigint)", [SINGLE_TENANT_LOCK]);
+    const count = await tenantCount(appDb.pool);
+    if (count > 1) throw new SingleTenantOccupiedError();
+    if (count === 1) {
+      const owner = await singleTenantOwner(appDb.pool);
+      if (!owner) throw new Error("single_tenant has a tenant without an org_owner.");
+      if (normalizeEmail(owner.email) !== email) throw new SingleTenantOccupiedError();
+      await ensureCredentialUser(auth, { ...input, email });
+      return {
+        tenantId: owner.tenantId,
+        organizationId: owner.organizationId,
+        authUserId: owner.authUserId,
+        created: false,
+      };
+    }
+    return await createTenantWithOwner(auth, appDb, { ...input, email });
+  } finally {
+    await client.query("SELECT pg_advisory_unlock(hashtext($1)::bigint)", [SINGLE_TENANT_LOCK]).catch(
+      () => undefined,
+    );
+    await client.end();
   }
-  // Two overlapping bootstraps can both see an empty directory. Run this once.
-  return createTenantWithOwner(auth, appDb, { ...input, email });
 }
 
 export async function grantMembership(
@@ -102,21 +116,27 @@ export async function ensureCredentialUser(
   auth: GotongAuth,
   input: CredentialUserInput,
 ): Promise<{ id: string; email: string }> {
-  if (input.password.length < MIN_PASSWORD_LENGTH) {
-    throw new Error("Password must be at least 12 characters.");
+  if (input.password.length < MIN_PASSWORD_LENGTH || input.password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error("Password length is outside the allowed range.");
   }
   const email = normalizeEmail(input.email);
   const ctx = await auth.$context;
   const existing = await ctx.internalAdapter.findUserByEmail(email, { includeAccounts: true });
   if (existing) {
     const credential = existing.accounts.find((account) => account.providerId === "credential");
-    if (!credential) {
+    if (!credential?.password) {
       await ctx.internalAdapter.linkAccount({
         accountId: existing.user.id,
         providerId: "credential",
         userId: existing.user.id,
         password: await ctx.password.hash(input.password),
       });
+    } else {
+      const matches = await ctx.password.verify({
+        hash: credential.password,
+        password: input.password,
+      });
+      if (!matches) throw new Error("Password does not match the existing account.");
     }
     return { id: existing.user.id, email: existing.user.email };
   }
@@ -134,11 +154,22 @@ export async function ensureCredentialUser(
 }
 
 export function tenantSlug(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "");
-  if (!slug) throw new Error("Tenant name must include a letter or a digit.");
-  return slug.slice(0, 64);
+  const trimmed = name.trim().toLowerCase();
+  if (!trimmed) throw new Error("Tenant name is empty.");
+  const base = trimmed.replace(/[^a-z0-9]+/gu, "-").replace(/^-+|-+$/gu, "");
+  const suffix = createHash("sha256").update(trimmed).digest("hex").slice(0, 8);
+  if (!base) return `tenant-${suffix}`;
+  if (base.length <= SLUG_MAX) return base;
+  const room = SLUG_MAX - suffix.length - 1;
+  return `${base.slice(0, room)}-${suffix}`;
+}
+
+async function connectOutsidePool(appDb: TenantDatabase): Promise<pg.Client> {
+  const connectionString = appDb.pool.options.connectionString;
+  if (typeof connectionString !== "string" || connectionString.length === 0) {
+    throw new Error("database url is missing");
+  }
+  const client = new pg.Client({ connectionString });
+  await client.connect();
+  return client;
 }

@@ -1,5 +1,8 @@
 import { grantSchemaDml, QUEUE_ROLE, QUEUE_SCHEMA } from "@gotonghr/db";
+import pg from "pg";
 import { PgBoss } from "pg-boss";
+
+const QUEUE_PROVISION_LOCK = "gotonghr.queue.provision";
 
 export const BOSS_SCHEMA = QUEUE_SCHEMA;
 export const MAINTENANCE_QUEUE = "gotong.maintenance";
@@ -52,12 +55,26 @@ export async function startBoss(
   }
 }
 
-/** Creates the pg-boss schema as the migrator, then grants DML to gotong_queue. */
+/**
+ * Creates the pg-boss schema as the migrator, then grants DML to gotong_queue.
+ * An advisory lock keeps two callers, including parallel test files, from
+ * migrating the schema at the same time.
+ */
 export async function provisionQueue(migratorUrl: string): Promise<void> {
-  const boss = await startBoss(migratorUrl, { provision: true });
+  const client = new pg.Client({ connectionString: migratorUrl });
+  await client.connect();
   try {
-    await grantSchemaDml(migratorUrl, BOSS_SCHEMA, QUEUE_ROLE);
+    await client.query("SELECT pg_advisory_lock(hashtext($1)::bigint)", [QUEUE_PROVISION_LOCK]);
+    const boss = await startBoss(migratorUrl, { provision: true });
+    try {
+      await grantSchemaDml(migratorUrl, BOSS_SCHEMA, QUEUE_ROLE);
+    } finally {
+      await boss.stop({ graceful: false, close: true });
+    }
   } finally {
-    await boss.stop({ graceful: false, close: true });
+    await client
+      .query("SELECT pg_advisory_unlock(hashtext($1)::bigint)", [QUEUE_PROVISION_LOCK])
+      .catch(() => undefined);
+    await client.end();
   }
 }

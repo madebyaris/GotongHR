@@ -7,6 +7,7 @@ import {
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { resolveTrustProxy } from "./trust-proxy.ts";
 
 const readySchema = z.object({
   data: z.object({ status: z.literal("ready") }).nullable(),
@@ -18,12 +19,15 @@ export interface ServerDeps {
   checkReady: () => Promise<void>;
   storage?: LocalObjectStorage | S3ObjectStorage;
   logger?: boolean;
+  /** Fastify trustProxy. A number is a hop count from a private peer. Default 1. */
+  trustProxy?: boolean | number | string | string[];
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: deps.logger ? { level: "info" } : false,
     bodyLimit: 2 * 1024 * 1024,
+    trustProxy: resolveTrustProxy(deps.trustProxy),
   }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

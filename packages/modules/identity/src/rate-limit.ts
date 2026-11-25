@@ -5,6 +5,10 @@ const limitedPaths = new Set([
   "/api/auth/sign-in/email",
   "/api/auth/request-password-reset",
   "/api/auth/reset-password",
+  "/api/auth/two-factor/verify-totp",
+  "/api/auth/two-factor/verify-backup-code",
+  "/api/auth/two-factor/send-otp",
+  "/api/auth/two-factor/verify-otp",
 ]);
 
 export function isCredentialRoute(url: string): boolean {
@@ -12,9 +16,26 @@ export function isCredentialRoute(url: string): boolean {
   return limitedPaths.has(path);
 }
 
-export function rateLimitKey(request: FastifyRequest): string {
+/**
+ * `request.ip` already applies Fastify `trustProxy`. CF-Connecting-IP is
+ * read only when the operator has set GOTONG_TRUST_CLOUDFLARE, so a client
+ * that can reach the origin cannot spoof the rate-limit key.
+ */
+export function clientAddress(
+  request: { ip: string; headers: FastifyRequest["headers"] },
+  trustCloudflare: boolean,
+): string {
+  if (!trustCloudflare) return request.ip;
+  const header = request.headers["cf-connecting-ip"];
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (typeof raw !== "string") return request.ip;
+  const ip = raw.split(",")[0]?.trim();
+  return ip && ip.length > 0 ? ip : request.ip;
+}
+
+export function rateLimitKey(request: FastifyRequest, trustCloudflare: boolean): string {
   const path = request.url.split("?")[0] ?? request.url;
-  return `${request.ip}:${path}`;
+  return `${clientAddress(request, trustCloudflare)}:${path}`;
 }
 
 export function createPostgresRateLimitStore(pool: pg.Pool) {

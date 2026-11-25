@@ -1,9 +1,4 @@
-import {
-  applyDatabaseUrls,
-  createTenantDatabase,
-  loadRepoEnv,
-  requiredEnv,
-} from "@gotonghr/db";
+import { applyDatabaseUrls, createTenantDatabase, requiredEnv } from "@gotonghr/db";
 import {
   bootstrapOwner,
   createAuth,
@@ -13,7 +8,6 @@ import {
 } from "@gotonghr/identity";
 
 export async function runBootstrap(env: NodeJS.ProcessEnv = process.env): Promise<BootstrapResult> {
-  loadRepoEnv();
   applyDatabaseUrls(env);
   const mode = readDeploymentMode(env);
   if (mode !== "single_tenant") {

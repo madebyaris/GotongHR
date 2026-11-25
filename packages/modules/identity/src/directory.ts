@@ -124,43 +124,36 @@ export async function provisionDirectory(
     displayName: string;
   },
 ): Promise<string> {
-  const idResult = await appDb.pool.query<{ id: string }>("SELECT uuidv7() AS id");
-  const tenantId = idResult.rows[0]?.id;
-  if (!tenantId) throw new Error("uuidv7() returned no id.");
-  await appDb.withTenantContext(tenantId, async (tx) => {
-    await tx.execute(sql`
-      INSERT INTO id_tenants (id, organization_id, name, slug, status)
-      VALUES (${tenantId}::uuid, ${input.organizationId}, ${input.name}, ${input.slug}, 'active')
-    `);
-    for (const code of roleCodes) {
+  try {
+    const idResult = await appDb.pool.query<{ id: string }>("SELECT uuidv7() AS id");
+    const tenantId = idResult.rows[0]?.id;
+    if (!tenantId) throw new Error("uuidv7() returned no id.");
+    await appDb.withTenantContext(tenantId, async (tx) => {
       await tx.execute(sql`
-        INSERT INTO id_roles (tenant_id, code, permissions)
-        VALUES (${tenantId}::uuid, ${code}, ${textArray(rolePermissions[code])})
+        INSERT INTO id_tenants (id, organization_id, name, slug, status)
+        VALUES (${tenantId}::uuid, ${input.organizationId}, ${input.name}, ${input.slug}, 'active')
       `);
-    }
-    const inserted = await tx.execute(sql`
-      INSERT INTO id_users (tenant_id, auth_user_id, email, display_name)
-      VALUES (${tenantId}::uuid, ${input.authUserId}, ${input.email}, ${input.displayName})
-      RETURNING id
-    `);
-    const userId = readId(inserted.rows[0]);
-    if (!userId) throw new Error("id_users insert returned no id.");
-    const scope = roleScopeDefaults.org_owner;
-    const membership = await tx.execute(sql`
-      INSERT INTO id_memberships (
-        tenant_id, user_id, auth_user_id, role_id, direct_reports_only, self_only
-      )
-      SELECT ${tenantId}::uuid, ${userId}::uuid, ${input.authUserId}, id_roles.id,
-        ${scope.directReportsOnly}, ${scope.selfOnly}
-      FROM id_roles
-      WHERE id_roles.tenant_id = ${tenantId}::uuid AND id_roles.code = 'org_owner'
-      RETURNING id
-    `);
-    if ((membership.rowCount ?? 0) < 1) {
-      throw new Error("org_owner role was not seeded.");
-    }
-  });
-  return tenantId;
+      for (const code of roleCodes) {
+        await tx.execute(sql`
+          INSERT INTO id_roles (tenant_id, code, permissions)
+          VALUES (${tenantId}::uuid, ${code}, ${textArray(rolePermissions[code])})
+        `);
+      }
+      await insertUserMembership(tx, {
+        tenantId,
+        authUserId: input.authUserId,
+        email: input.email,
+        displayName: input.displayName,
+        role: "org_owner",
+      });
+    });
+    return tenantId;
+  } catch (error) {
+    await appDb.pool
+      .query("DELETE FROM ba_organization WHERE id = $1", [input.organizationId])
+      .catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function insertMembership(
@@ -173,54 +166,125 @@ export async function insertMembership(
     role: RoleCode;
   },
 ): Promise<string> {
+  return appDb.withTenantContext(input.tenantId, (tx) => insertUserMembership(tx, input));
+}
+
+async function insertUserMembership(
+  tx: Parameters<Parameters<TenantDatabase["withTenantContext"]>[1]>[0],
+  input: {
+    tenantId: string;
+    authUserId: string;
+    email: string;
+    displayName: string;
+    role: RoleCode;
+  },
+): Promise<string> {
   const scope = roleScopeDefaults[input.role];
-  return appDb.withTenantContext(input.tenantId, async (tx) => {
-    const inserted = await tx.execute(sql`
-      INSERT INTO id_users (tenant_id, auth_user_id, email, display_name)
-      VALUES (${input.tenantId}::uuid, ${input.authUserId}, ${input.email}, ${input.displayName})
-      RETURNING id
-    `);
-    const userId = readId(inserted.rows[0]);
-    if (!userId) throw new Error("id_users insert returned no id.");
-    const membership = await tx.execute(sql`
-      INSERT INTO id_memberships (
-        tenant_id, user_id, auth_user_id, role_id, direct_reports_only, self_only
-      )
-      SELECT ${input.tenantId}::uuid, ${userId}::uuid, ${input.authUserId}, id_roles.id,
-        ${scope.directReportsOnly}, ${scope.selfOnly}
-      FROM id_roles
-      WHERE id_roles.tenant_id = ${input.tenantId}::uuid AND id_roles.code = ${input.role}
-      RETURNING id
-    `);
-    if ((membership.rowCount ?? 0) < 1) {
-      throw new Error(`Role ${input.role} is not seeded for this tenant.`);
-    }
-    return userId;
-  });
+  const inserted = await tx.execute(sql`
+    INSERT INTO id_users (tenant_id, auth_user_id, email, display_name)
+    VALUES (${input.tenantId}::uuid, ${input.authUserId}, ${input.email}, ${input.displayName})
+    RETURNING id
+  `);
+  const userId = readId(inserted.rows[0]);
+  if (!userId) throw new Error("id_users insert returned no id.");
+  const membership = await tx.execute(sql`
+    INSERT INTO id_memberships (
+      tenant_id, user_id, auth_user_id, role_id, direct_reports_only, self_only
+    )
+    SELECT ${input.tenantId}::uuid, ${userId}::uuid, ${input.authUserId}, id_roles.id,
+      ${scope.directReportsOnly}, ${scope.selfOnly}
+    FROM id_roles
+    WHERE id_roles.tenant_id = ${input.tenantId}::uuid AND id_roles.code = ${input.role}
+    RETURNING id
+  `);
+  if ((membership.rowCount ?? 0) < 1) {
+    throw new Error(`Role ${input.role} is not seeded for this tenant.`);
+  }
+  return userId;
 }
 
 export async function recordSession(
   appDb: TenantDatabase,
   session: { id?: string; userId?: string },
+  options?: { totpVerified?: boolean },
 ): Promise<void> {
   const sessionId = session.id;
   const authUserId = session.userId;
   if (!sessionId || !authUserId) return;
+  const totpVerified = options?.totpVerified === true;
   const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
   for (const membership of memberships) {
     await appDb.withTenantContext(membership.tenantId, async (tx) => {
       await tx.execute(sql`
-        INSERT INTO id_sessions (tenant_id, auth_session_id, auth_user_id, user_id)
+        INSERT INTO id_sessions (
+          tenant_id, auth_session_id, auth_user_id, user_id, totp_verified_at
+        )
         VALUES (
           ${membership.tenantId}::uuid,
           ${sessionId},
           ${authUserId},
-          ${membership.userId}::uuid
+          ${membership.userId}::uuid,
+          ${totpVerified ? sql`now()` : sql`NULL`}
         )
-        ON CONFLICT (tenant_id, auth_session_id) DO NOTHING
+        ON CONFLICT (tenant_id, auth_session_id) DO UPDATE
+        SET totp_verified_at = COALESCE(id_sessions.totp_verified_at, EXCLUDED.totp_verified_at)
       `);
     });
   }
+  if (totpVerified) await revokeOtherAuthSessions(appDb, authUserId, sessionId);
+}
+
+export async function markSessionTotpVerified(
+  appDb: TenantDatabase,
+  authUserId: string,
+  authSessionId: string,
+): Promise<void> {
+  const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
+  for (const membership of memberships) {
+    await appDb.withTenantContext(membership.tenantId, async (tx) => {
+      await tx.execute(sql`
+        UPDATE id_sessions
+        SET totp_verified_at = COALESCE(totp_verified_at, now())
+        WHERE auth_session_id = ${authSessionId}
+      `);
+    });
+  }
+}
+
+export async function sessionHasTotpVerification(
+  appDb: TenantDatabase,
+  tenantId: string,
+  authSessionId: string,
+): Promise<boolean> {
+  return appDb.withTenantContext(tenantId, async (tx) => {
+    const result = await tx.execute<{ verified: boolean }>(sql`
+      SELECT totp_verified_at IS NOT NULL AS verified
+      FROM id_sessions
+      WHERE auth_session_id = ${authSessionId}
+    `);
+    return result.rows[0]?.verified === true;
+  });
+}
+
+async function revokeOtherAuthSessions(
+  appDb: TenantDatabase,
+  authUserId: string,
+  keepSessionId: string,
+): Promise<void> {
+  const memberships = await membershipsForAuthUser(appDb.pool, authUserId);
+  for (const membership of memberships) {
+    await appDb.withTenantContext(membership.tenantId, async (tx) => {
+      await tx.execute(sql`
+        DELETE FROM id_sessions
+        WHERE auth_user_id = ${authUserId}
+          AND auth_session_id <> ${keepSessionId}
+      `);
+    });
+  }
+  await appDb.pool.query("DELETE FROM ba_session WHERE user_id = $1 AND id <> $2", [
+    authUserId,
+    keepSessionId,
+  ]);
 }
 
 function textArray(values: readonly string[]): SQL {

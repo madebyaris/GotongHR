@@ -8,8 +8,9 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Better Auth field names stay camelCase. SQL names are snake_case and match
- * the statements in migrate.ts. Object keys are the Better Auth model names.
+ * Better Auth field names stay camelCase. SQL names are snake_case.
+ * `migrate.ts` is the DDL that is applied. Change both together.
+ * Object keys are the Better Auth model names.
  */
 
 function createdAt() {
@@ -17,7 +18,10 @@ function createdAt() {
 }
 
 function updatedAt() {
-  return timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow();
+  return timestamp("updated_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date());
 }
 
 export const baUser = pgTable("ba_user", {

@@ -1,6 +1,8 @@
+import { loadRepoEnv } from "@gotonghr/db";
 import { runBootstrap } from "../bootstrap.ts";
 
 async function main(): Promise<void> {
+  loadRepoEnv();
   const result = await runBootstrap(process.env);
   process.stdout.write(
     `${JSON.stringify({ tenantId: result.tenantId, created: result.created })}\n`,

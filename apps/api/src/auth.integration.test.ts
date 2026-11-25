@@ -49,6 +49,10 @@ describe("api identity", { concurrency: 1 }, () => {
     process.env.STORAGE_DRIVER ??= "local";
     process.env.STORAGE_LOCAL_SECRET = "local-test-storage-secret-0123456789";
     process.env.QUEUE_DRIVER ??= "pgboss";
+    process.env.GOTONG_AUTH_RATE_LIMIT_MAX = "10";
+    process.env.GOTONG_AUTH_RATE_LIMIT_WINDOW_MS = "60000";
+    process.env.GOTONG_TRUST_PROXY = "1";
+    process.env.GOTONG_TRUST_CLOUDFLARE = "false";
     const migrateEnv = migrateEnvFrom(process.env);
     await migrate(migrateEnv);
     await migrateIdentity({
@@ -151,6 +155,16 @@ describe("api identity", { concurrency: 1 }, () => {
     const allowed = await getProbe(nextCookie);
     assert.equal(allowed.statusCode, 200, allowed.body);
     assert.equal(probe.hits, 1);
+
+    const stale = await getProbe(ownerCookie);
+    assert.notEqual(stale.statusCode, 200);
+    assert.equal(probe.hits, 1);
+
+    await superuserExec("UPDATE id_sessions SET totp_verified_at = NULL");
+    const unverified = await getProbe(nextCookie);
+    assert.equal(unverified.statusCode, 403);
+    assert.equal(readError(unverified.body), "totp_verification_required");
+    assert.equal(probe.hits, 1);
   });
 
   it("rate limits login and password reset", async () => {
@@ -177,6 +191,15 @@ describe("api identity", { concurrency: 1 }, () => {
     }
     assert.equal(resetCodes[10], 429);
     assert.equal(resetCodes.slice(0, 10).every((status) => status !== 429), true);
+
+    await composed.appDb.pool.query("DELETE FROM id_rate_limits");
+    const totpCodes: number[] = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      const response = await postAuth("/api/auth/two-factor/verify-totp", { code: "000000" });
+      totpCodes.push(response.statusCode);
+    }
+    assert.equal(totpCodes[10], 429);
+    assert.equal(totpCodes.slice(0, 10).every((status) => status !== 429), true);
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const health = await composed.app.inject({ method: "GET", url: "/healthz" });
@@ -292,6 +315,16 @@ function base32Decode(input: string): Buffer {
     }
   }
   return Buffer.from(bytes);
+}
+
+async function superuserExec(text: string): Promise<void> {
+  const admin = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
+  await admin.connect();
+  try {
+    await admin.query(text);
+  } finally {
+    await admin.end();
+  }
 }
 
 async function resetIdentity(): Promise<void> {

@@ -30,7 +30,11 @@ The shell is served at `http://localhost/`. Readiness is `http://localhost/api/r
 pnpm --filter @gotonghr/api bootstrap
 ```
 
-Set `GOTONG_BOOTSTRAP_EMAIL` and `GOTONG_BOOTSTRAP_PASSWORD` (at least 12 characters). The same email returns the existing tenant. A different email is refused, and a second tenant is not created. `NODE_ENV=production` refuses the placeholder auth secret and the placeholder bootstrap password. Sign-in is mounted at `/api/auth/*`. Login and password reset are limited to 10 requests a minute per IP. `/api/v1/platform/*` is not mounted. Session cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`, so a browser stores them only after TLS terminates in front of the API.
+Set `GOTONG_BOOTSTRAP_EMAIL` and `GOTONG_BOOTSTRAP_PASSWORD` (12 to 128 characters). Run one bootstrap at a time. The command takes a Postgres advisory lock, so an overlapping run waits and then sees the existing tenant instead of creating a second one. The same email returns the existing tenant. A different email is refused. `NODE_ENV=production` refuses the placeholder auth secret, the placeholder bootstrap password, and a `BETTER_AUTH_URL` that is missing or not `https://`.
+
+`BETTER_AUTH_URL` is the browser origin, such as `http://localhost` behind Caddy. It is not the API bind address. Extra browser origins go in `GOTONG_TRUSTED_ORIGINS` as a comma-separated list. Sign-in is mounted at `/api/auth/*`. `/api/v1/platform/*` is not mounted. Session cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`, so a browser stores them only after TLS terminates in front of the API.
+
+Sign-in, password reset, and the two-factor verification routes are limited separately, per IP. The defaults are 10 requests per 60 seconds. Override them with `GOTONG_AUTH_RATE_LIMIT_MAX` and `GOTONG_AUTH_RATE_LIMIT_WINDOW_MS`. `GOTONG_TRUST_PROXY` defaults to `1`: one forwarding hop, and only when the socket peer is loopback or a private address (Caddy on the host or the Docker bridge). A numeric hop count is not passed through to Fastify, which ignores bare hop counts. `CF-Connecting-IP` is used for that limit only when `GOTONG_TRUST_CLOUDFLARE=true`.
 
 Postgres is published on `127.0.0.1:5432` and the API on `127.0.0.1:3000`. Caddy publishes port 80. TLS is not configured in this slice: the Phase 0 checks use HTTP until a hostname exists.
 

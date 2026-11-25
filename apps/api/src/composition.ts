@@ -5,7 +5,7 @@ import {
   requiredEnv,
   type TenantDatabase,
 } from "@gotonghr/db";
-import { createAuth, registerIdentity, type GotongAuth } from "@gotonghr/identity";
+import { createAuth, readTrustProxy, registerIdentity, type GotongAuth } from "@gotonghr/identity";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { readConfig, type AppConfig } from "./config.ts";
@@ -28,63 +28,76 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
   const config = readConfig(env);
   const appDb = createTenantDatabase(requiredEnv(env, "DATABASE_URL_APP"));
   const platformDb = createTenantDatabase(requiredEnv(env, "DATABASE_URL_PLATFORM"), 2);
-  await appDb.pool.query("select 1");
-  await platformDb.pool.query("select 1");
-  const boss = await startBoss(requiredEnv(env, "DATABASE_URL_QUEUE"));
-  const storage = createStorage(env);
-  let closed = false;
-  let closing: Promise<void> | undefined;
-  const app = await buildServer({
-    logger: env.NODE_ENV !== "test",
-    storage,
-    checkReady: async () => {
-      if (closed) {
-        throw new Error("queue is not started");
-      }
-      await appDb.pool.query("select 1");
-      const queue = await boss.getQueue(MAINTENANCE_QUEUE);
-      if (!queue) {
-        throw new Error("maintenance queue is missing");
-      }
-    },
-  });
-  const auth = createAuth({ appDb, env });
-  await registerIdentity(app, { auth, appDb, env });
+  let boss: PgBoss | undefined;
+  let app: FastifyInstance | undefined;
+  try {
+    await appDb.pool.query("select 1");
+    await platformDb.pool.query("select 1");
+    boss = await startBoss(requiredEnv(env, "DATABASE_URL_QUEUE"));
+    const storage = createStorage(env);
+    let closed = false;
+    let closing: Promise<void> | undefined;
+    const runningBoss = boss;
+    app = await buildServer({
+      logger: env.NODE_ENV !== "test",
+      trustProxy: readTrustProxy(env),
+      storage,
+      checkReady: async () => {
+        if (closed) {
+          throw new Error("queue is not started");
+        }
+        await appDb.pool.query("select 1");
+        const queue = await runningBoss.getQueue(MAINTENANCE_QUEUE);
+        if (!queue) {
+          throw new Error("maintenance queue is missing");
+        }
+      },
+    });
+    const auth = createAuth({ appDb, env });
+    await registerIdentity(app, { auth, appDb, env });
+    const runningApp = app;
 
-  return {
-    app,
-    config,
-    appDb,
-    auth,
-    boss,
-    close() {
-      closing ??= (async () => {
-        closed = true;
-        const failures: unknown[] = [];
-        for (const step of [
-          () => app.close(),
-          () => boss.stop({ graceful: true, close: true }),
-          () => appDb.end(),
-          () => platformDb.end(),
-        ]) {
-          try {
-            await step();
-          } catch (error) {
-            failures.push(error);
+    return {
+      app,
+      config,
+      appDb,
+      auth,
+      boss,
+      close() {
+        closing ??= (async () => {
+          closed = true;
+          const failures: unknown[] = [];
+          for (const step of [
+            () => runningApp.close(),
+            () => runningBoss.stop({ graceful: true, close: true }),
+            () => appDb.end(),
+            () => platformDb.end(),
+          ]) {
+            try {
+              await step();
+            } catch (error) {
+              failures.push(error);
+            }
           }
-        }
-        if (failures.length === 0) return;
-        const errors = failures.map((failure) =>
-          failure instanceof Error ? failure : new Error(String(failure)),
-        );
-        for (const error of errors) {
-          process.stderr.write(
-            `${JSON.stringify({ msg: "shutdown step failed", error: error.message })}\n`,
+          if (failures.length === 0) return;
+          const errors = failures.map((failure) =>
+            failure instanceof Error ? failure : new Error(String(failure)),
           );
-        }
-        throw new AggregateError(errors, "shutdown failed");
-      })();
-      return closing;
-    },
-  };
+          for (const error of errors) {
+            process.stderr.write(
+              `${JSON.stringify({ msg: "shutdown step failed", error: error.message })}\n`,
+            );
+          }
+          throw new AggregateError(errors, "shutdown failed");
+        })();
+        return closing;
+      },
+    };
+  } catch (error) {
+    await app?.close().catch(() => undefined);
+    await boss?.stop({ graceful: false, close: true }).catch(() => undefined);
+    await appDb.end().catch(() => undefined);
+    await platformDb.end().catch(() => undefined);
+    throw error;
+  }
 }
