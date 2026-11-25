@@ -14,7 +14,15 @@ interface RulesetRule {
   enabled: boolean;
   action_parameters?: {
     cache?: boolean;
-    edge_ttl?: { mode?: string; default?: number };
+    edge_ttl?: {
+      mode?: string;
+      default?: number;
+      status_code_ttl?: Array<{
+        status_code?: number;
+        status_code_range?: { from?: number; to?: number };
+        value?: number;
+      }>;
+    };
     browser_ttl?: { mode?: string; default?: number };
     response?: { status_code?: number; content_type?: string; content?: string };
   };
@@ -63,6 +71,8 @@ test("wrangler runs the Worker only for /api and serves the SPA from dist", () =
 test("_headers keeps API and auth private and hashed assets immutable", () => {
   const file = readRepo("apps/web/public/_headers");
   const samples = {
+    "/": "public, max-age=0, must-revalidate",
+    "/clock-in": "public, max-age=0, must-revalidate",
     "/assets/app-abc123.js": "public, max-age=31536000, immutable",
     "/index.html": "public, max-age=0, must-revalidate",
     "/manifest.webmanifest": "public, max-age=0, must-revalidate",
@@ -114,6 +124,14 @@ test("WAF ruleset blocks probes and methods without challenging Indonesian netwo
   const auth = ruleMatching(ruleset, "/api/auth/");
   assert.equal(auth.action, "block");
   assert.match(auth.expression, /sqlmap/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "\.\.\/"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "<script"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "%2e%2e"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "%3cscript"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "\.\.%2f"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "%2e%2e%2f"/);
+  assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "%2f%2e%2e"/);
+  assert.doesNotMatch(auth.expression, /contains "%2f"/);
   assert.doesNotMatch(auth.expression, /http\.request\.uri\.path eq "\/api\/auth/);
 
   for (const rule of ruleset.rules) {
@@ -146,12 +164,18 @@ test("rate limits let a 30-person office NAT clock in together", () => {
   assert.ok(clock.ratelimit);
   assert.ok(clock.ratelimit.requests_per_period >= 120);
   assert.match(clock.expression, /\/api\/attendance\/clock/);
+  assert.match(clock.expression, /\/api\/v1\/attendance\/clock/);
+  assert.doesNotMatch(clock.expression, /\/api\/v1\/mobile\/clock/);
+  assert.equal(
+    ruleset.rules.some((rule) => rule.expression.includes("/api/v1/mobile/clock")),
+    false,
+  );
 });
 
 test("cache rules never store API or auth and keep hashed assets for a year", () => {
   const ruleset = readRuleset("cache-rules.json", "http_request_cache_settings");
   const api = ruleMatching(ruleset, "/api/");
-  const assets = ruleMatching(ruleset, "/assets/");
+  const assets = ruleMatching(ruleset, "(starts_with(http.request.uri.path, \"/assets/\"))");
   const cookies = ruleset.rules.find((rule) => rule.expression.includes("better-auth.session_token"));
   assert.ok(cookies);
   assert.equal(api.action, "set_cache_settings");
@@ -159,17 +183,34 @@ test("cache rules never store API or auth and keep hashed assets for a year", ()
   assert.match(api.expression, /\/auth\//);
   assert.equal(assets.action_parameters?.cache, true);
   assert.equal(assets.action_parameters?.edge_ttl?.mode, "override_origin");
-  assert.equal(assets.action_parameters?.edge_ttl?.default, 31536000);
-  assert.equal(assets.action_parameters?.browser_ttl?.default, 31536000);
+  assert.equal(assets.action_parameters?.edge_ttl?.default, 0);
+  const statusTtl = assets.action_parameters?.edge_ttl?.status_code_ttl ?? [];
+  assert.equal(statusTtl.find((item) => item.status_code === 200)?.value, 31536000);
+  assert.equal(
+    statusTtl.find((item) => item.status_code_range?.from === 400 && item.status_code_range.to === 499)?.value,
+    0,
+  );
+  assert.equal(
+    statusTtl.find((item) => item.status_code_range?.from === 500 && item.status_code_range.to === 599)?.value,
+    0,
+  );
+  assert.equal(
+    statusTtl.some((item) => item.value === 31536000 && item.status_code !== 200),
+    false,
+  );
+  assert.equal(assets.action_parameters?.browser_ttl?.mode, "respect_origin");
+  assert.equal(assets.action_parameters?.browser_ttl?.default, undefined);
   assert.match(cookies.expression, /not starts_with\(http\.request\.uri\.path, "\/assets\/"\)/);
   assert.ok(ruleset.rules.indexOf(api) < ruleset.rules.indexOf(assets));
   assert.ok(ruleset.rules.indexOf(assets) < ruleset.rules.indexOf(cookies));
 });
 
-test("API-only Caddy trusts CF-Connecting-IP only from Cloudflare hops", () => {
+test("API-only Caddy trusts the zone origin-pull CA and Cloudflare hops", () => {
   const file = readRepo("infra/caddy/Caddyfile.api-only");
   assert.match(file, /mode require_and_verify/);
-  assert.match(file, /trust_pool file \/etc\/caddy\/certs\/cloudflare-origin-pull-ca\.pem/);
+  assert.match(file, /trust_pool file \/etc\/caddy\/certs\/cloudflare-zone-origin-pull-ca\.pem/);
+  assert.doesNotMatch(file, /cloudflare-origin-pull-ca\.pem/);
+  assert.doesNotMatch(file, /authenticated_origin_pull_ca/);
   assert.match(file, /client_ip_headers CF-Connecting-IP\n/);
   assert.doesNotMatch(file, /client_ip_headers[^\n]*X-Forwarded-For/);
   assert.match(file, /header_up -X-Forwarded-For/);
@@ -184,7 +225,7 @@ test("API-only Caddy trusts CF-Connecting-IP only from Cloudflare hops", () => {
   assert.equal(trusted.length, 22);
   assert.ok(trusted.includes("173.245.48.0/20"));
   assert.ok(trusted.includes("2c0f:f248::/32"));
-  assert.equal(readRepo("infra/caddy/certs/cloudflare-origin-pull-ca.pem").includes("BEGIN CERTIFICATE"), true);
+  assert.equal(readRepo("infra/caddy/certs/.gitignore").includes("!.gitignore"), true);
 });
 
 test("Cloudflare compose drops the static frontend and caps the tunnel", () => {
@@ -195,11 +236,30 @@ test("Cloudflare compose drops the static frontend and caps the tunnel", () => {
   assert.match(file, /mem_limit: 48m/);
   assert.match(file, /cloudflare\/cloudflared:2026\.11\.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6/);
   assert.match(file, /TUNNEL_TRANSPORT_PROTOCOL: http2/);
-  assert.match(file, /Caddyfile\.api-only/);
+  assert.match(file, /\.\.\/infra\/caddy\/Caddyfile\.api-only:\/etc\/caddy\/Caddyfile:ro/);
+  assert.match(
+    file,
+    /\.\.\/infra\/caddy\/certs\/cloudflare-zone-origin-pull-ca\.pem:\/etc\/caddy\/certs\/cloudflare-zone-origin-pull-ca\.pem:ro/,
+  );
+  assert.doesNotMatch(file, /\.\.\/caddy\//);
+  assert.doesNotMatch(file, /cloudflare-origin-pull-ca\.pem/);
   assert.match(file, /profiles: \["origin-pull"\]/);
   assert.doesNotMatch(file, /80:8080/);
   assert.match(file, /TRUSTED_ORIGINS:/);
   assert.match(file, /TRUSTED_PROXY_CIDRS:/);
+});
+
+test("edge docs keep the WAF on and describe the zone origin-pull CA", () => {
+  const readme = readRepo("infra/cloudflare/README.md");
+  assert.match(readme, /Do not skip `http_request_firewall_custom` or `http_ratelimit`/);
+  assert.doesNotMatch(readme, /Add a skip rule/);
+  assert.match(readme, /cloudflare-zone-origin-pull-ca\.pem/);
+  assert.match(readme, /Leave the global Authenticated Origin Pulls toggle off/);
+  assert.match(readme, /includeSubDomains/);
+  assert.match(readme, /preload/);
+  assert.match(readme, /\/api\/v1\/mobile\/clock/);
+  assert.match(readme, /CGNAT/);
+  assert.doesNotMatch(readme, /authenticated_origin_pull_ca\.pem`\. That CA is the one to trust/);
 });
 
 function readRepo(relative: string): string {
@@ -233,7 +293,9 @@ function readRuleset(name: string, phase: string): RulesetFile {
 }
 
 function ruleMatching(ruleset: RulesetFile, needle: string): RulesetRule {
-  const rule = ruleset.rules.find((item) => item.expression.includes(needle));
+  const matches = ruleset.rules.filter((item) => item.expression.includes(needle));
+  assert.equal(matches.length, 1, `${needle} matched ${matches.length}`);
+  const rule = matches[0];
   assert.ok(rule, needle);
   return rule;
 }

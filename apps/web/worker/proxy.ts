@@ -2,6 +2,7 @@ import { errorResponse, PRIVATE_NO_STORE, withSecurityHeaders } from "./headers.
 
 export const API_PREFIX = "/api";
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+export const UPSTREAM_TIMEOUT_MS = 30_000;
 
 const STRIP_REQUEST_HEADERS = new Set([
   "host",
@@ -126,18 +127,8 @@ export async function proxyApi(
   const decision = resolveApiOrigin(apiOrigin, environment);
   if (!decision.ok) return errorResponse(502, "bad_gateway", decision.message);
 
-  const declared = request.headers.get("content-length");
-  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > MAX_BODY_BYTES)) {
-    return errorResponse(413, "too_large", "Request body is too large.");
-  }
-
-  let body: ArrayBuffer | undefined;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    body = await request.arrayBuffer();
-    if (body.byteLength > MAX_BODY_BYTES) {
-      return errorResponse(413, "too_large", "Request body is too large.");
-    }
-  }
+  const bounded = await readRequestBody(request);
+  if (bounded instanceof Response) return bounded;
 
   let upstreamUrl: string;
   try {
@@ -152,8 +143,9 @@ export async function proxyApi(
       method: request.method,
       headers: forwardedHeaders(request),
       redirect: "manual",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     };
-    if (body !== undefined) init.body = body;
+    if (bounded.body !== undefined) init.body = bounded.body;
     upstreamResponse = await upstream(upstreamUrl, init);
   } catch {
     return errorResponse(502, "bad_gateway", "API origin is unreachable.");
@@ -162,6 +154,44 @@ export async function proxyApi(
   return withSecurityHeaders(sanitizeUpstream(upstreamResponse), {
     "cache-control": PRIVATE_NO_STORE,
   });
+}
+
+async function readRequestBody(request: Request): Promise<{ body?: ArrayBuffer } | Response> {
+  if (request.method === "GET" || request.method === "HEAD") return {};
+  const declared = request.headers.get("content-length");
+  if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > MAX_BODY_BYTES)) {
+    return errorResponse(413, "too_large", "Request body is too large.");
+  }
+
+  const reader = request.body?.getReader();
+  if (reader === undefined) return { body: new ArrayBuffer(0) };
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined || value.byteLength === 0) continue;
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return errorResponse(413, "too_large", "Request body is too large.");
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return errorResponse(400, "bad_request", "Request body could not be read.");
+  }
+
+  const merged = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { body: merged.buffer.slice(0, size) };
 }
 
 function sanitizeUpstream(response: Response): Response {

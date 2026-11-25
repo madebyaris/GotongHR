@@ -12,6 +12,8 @@ From the repo root, with a Cloudflare API token that can edit Workers:
 pnpm --filter @gotonghr/web deploy
 ```
 
+That script typechecks the Worker, runs its tests, builds the SPA, and then runs `wrangler deploy`.
+
 `apps/web/wrangler.jsonc` uploads `apps/web/dist`. `run_worker_first` is `/api` and `/api/*` only. `/assets/*` and HTML navigations stay on the asset path. `compatibility_date` is `2026-11-25`, so a browser navigation does not invoke the Worker. `observability.enabled` is true.
 
 Set `API_ORIGIN` when this Worker should proxy `/api/*`:
@@ -40,7 +42,9 @@ The Worker forwards `Origin`, `Cookie`, and the browser `Host` as `X-Forwarded-H
 
 An `api.` hostname is the other layout. Leave `API_ORIGIN` unset so this Worker does not proxy. Point `api.example.co.id` at the tunnel. The SPA then calls that host from the browser. That needs CORS on the API and a `connect-src` change in both `apps/web/worker/headers.ts` and `apps/web/public/_headers`. This repo does not add that CORS policy. Prefer the same-origin proxy.
 
-If `API_ORIGIN` is a proxied name on the same zone, the WAF and rate limits run a second time on the Worker subrequest. Add a skip rule for that hostname only, for phases `http_request_firewall_custom` and `http_ratelimit`. Do not skip those phases on `hr.example.co.id`.
+Do not skip `http_request_firewall_custom` or `http_ratelimit` by hostname. A skip for `origin.example.co.id` also matches someone who opens that name directly, so the WAF and the rate limits would not run. Keep both phases enabled on every public hostname.
+
+Prefer a tunnel. The tunnel hostname is not a public proxied name, and the Worker subrequest does not cross the zone rules a second time. If the origin has to be a proxied name on the same zone, leave the rules on. A second evaluation is the safe result. You can also require a credential that only this Worker sends and that the origin checks. That credential does not replace the rules. This repository does not add a hostname skip.
 
 ## Cache
 
@@ -48,11 +52,15 @@ If `API_ORIGIN` is a proxied name on the same zone, the WAF and rate limits run 
 
 | Path | Cache-Control |
 | :--- | :--- |
+| `/`, `/clock-in`, other HTML routes, `/index.html`, `/manifest.webmanifest`, `/sw.js` | `public, max-age=0, must-revalidate` |
 | `/assets/*` | `public, max-age=31536000, immutable` |
-| `/index.html`, `/manifest.webmanifest`, `/sw.js` | `public, max-age=0, must-revalidate` |
-| `/api/*`, `/auth/*` | `private, no-store` |
+| `/api`, `/api/*`, `/auth`, `/auth/*` | `private, no-store` |
 
-The cache rules in `infra/cloudflare/rulesets/cache-rules.json` repeat that policy at the zone. The first matching rule wins. API and auth bypass first. `/assets/*` then caches for 31536000 seconds at the edge and in the browser. A Better Auth session cookie bypasses cache on every other path. The cookie name checked is `better-auth.session_token`, which also matches the `__Secure-` prefix. Hashed assets stay cached for a logged-in browser, because those URLs change when the bytes change.
+`/*` sets the short HTML lifetime, so `/` and a SPA route such as `/clock-in` revalidate after a deploy. Later rules replace that value for hashed assets, `/api`, and `/auth`.
+
+Responses also send `Strict-Transport-Security: max-age=31536000`. `includeSubDomains` is off, so a new hostname is not pinned before it has a certificate. `preload` is off. Preload is a permanent browser-list submission. Turn those two on in the zone HSTS screen only after every name in the zone is HTTPS.
+
+The cache rules in `infra/cloudflare/rulesets/cache-rules.json` repeat the bypass at the zone. The first matching rule wins. API and auth bypass first. `/assets/*` then stores HTTP 200 at the edge for 31536000 seconds. The edge default for every other status is 0, which is no-cache. `status_code_ttl` also sets 400–499 and 500–599 to 0, so a removed hashed file is not kept for a year. Value 0 means no-cache. It does not mean a one-year store. Browser TTL follows the origin, so `apps/web/public/_headers` is what the browser sees, including `immutable` on `/assets/*`. A Better Auth session cookie bypasses cache on every other path. The cookie name checked is `better-auth.session_token`, which also matches the `__Secure-` prefix. Hashed assets stay cached for a logged-in browser, because those URLs change when the bytes change.
 
 Vite still writes `.br` and `.gz` next to the files for Caddy on a full VPS. `apps/web/public/.assetsignore` keeps those sidecars out of the Worker upload. Cloudflare Brotli compresses the plain files on the way out.
 
@@ -95,7 +103,7 @@ Custom WAF rules:
 - Block dotfiles, backup extensions, and common probe paths. `/.well-known/` stays open.
 - Block methods outside GET, HEAD, POST, PUT, PATCH, DELETE, and OPTIONS.
 - Block `/api/platform` and `/api/v1/platform` unless a Cloudflare Access JWT cookie, `Cf-Access-Jwt-Assertion`, or `CF-Access-Client-Id` is present. The header check stops anonymous scans. Access still has to validate the credential.
-- On `/api/auth/`, block known scanner user agents and `../` probes. The rule does not use country, threat score, or bot score, and it does not challenge. Telkomsel, XL, Indosat, Tri, Smartfren, and office NAT stay through.
+- On `/api/auth/`, block known scanner user agents. The query is lowercased. The rule matches `../`, `<script`, `%2e%2e`, `%3cscript`, and encoded traversal that contains `%2f` (`..%2f`, `%2e%2e%2f`, `%2f%2e%2e`). A bare `%2f` is not a match, because an auth query can carry an encoded URL. The rule does not use country, threat score, or bot score, and it does not challenge. Telkomsel, XL, Indosat, Tri, Smartfren, and office NAT stay through.
 
 Rate limits count by `cf.colo.id` and `ip.src`. They do not count by a cookie or a header, because a client can rotate those and get a new counter. One office is one IP at one colo. The whole budget can be spent in the first seconds of the window.
 
@@ -104,10 +112,13 @@ Rate limits count by `cf.colo.id` and `ip.src`. They do not count by a cookie or
 | `/api/auth/sign-in*` | 120 | 60 seconds |
 | `/api/auth/two-factor*` | 90 | 60 seconds |
 | `/api/auth/forget-password*` | 30 | 120 seconds |
-| `/api/attendance/clock*`, `/api/v1/attendance/clock*`, `/api/v1/mobile/clock*` | 180 | 10 seconds |
+| `/api/attendance/clock*`, `/api/v1/attendance/clock*` | 180 | 10 seconds |
+| `/api/v1/mobile/clock*` | none at the edge | per user and device in the API |
 | `/api/ai/*` | 60 | 30 seconds |
 
-180 clock-in requests cover 30 people with a status read and retries at 08:00 WIB. A limit of 10 or 30 per minute would block that office. The same paths under `/api/v1/` are included so a versioned mount is covered. Periods of 60 seconds need a plan that allows that period. If the account only allows 10 second periods, keep `requests_per_period` at least 120 for clock-in.
+180 office clock-in requests cover 30 people with a status read and retries at 08:00 WIB. A limit of 10 or 30 per minute would block that office. `/api/v1/attendance/clock` is included so a versioned mount is covered. Periods of 60 seconds need a plan that allows that period. If the account only allows 10 second periods, keep `requests_per_period` at least 120 for office clock-in.
+
+`/api/v1/mobile/clock` is not on the per-IP rule. A carrier CGNAT address is shared by subscribers who do not work together, so the 180 per minute office cap would return 429 to people outside that office. The API must limit that route per authenticated user and per device after Slice 1.1. Until that limit exists, one CGNAT address can send an unlimited number of mobile clock requests. That is the trade-off. Do not put the mobile path back on `ip.src` to close it.
 
 ## Platform Super-Admin
 
@@ -159,9 +170,7 @@ docker compose --env-file .env \
   up -d --build
 ```
 
-Create the origin certificate in the Cloudflare dashboard (SSL/TLS, Origin Server). Install the PEM and key on the VPS. The compose file mounts them read-only. It also mounts `infra/caddy/certs/cloudflare-origin-pull-ca.pem`.
-
-Turn on Authenticated Origin Pulls for the zone. Full (strict) must already be on.
+Create the origin certificate in the Cloudflare dashboard (SSL/TLS, Origin Server). Install the PEM and key on the VPS. The compose file mounts them read-only. Full (strict) must already be on. Leave the global Authenticated Origin Pulls toggle off.
 
 `cloudflared` is `2026.11.2`, pinned by the multi-arch index digest in the compose file. It uses HTTP/2 (`TUNNEL_TRANSPORT_PROTOCOL=http2`) because some networks block QUIC from the VPS. Set `CLOUDFLARE_TUNNEL_TOKEN`. In the tunnel UI, the public hostname for the origin points at `http://api:3000`.
 
@@ -169,11 +178,25 @@ The static `caddy` service is on profile `vps-frontend` and does not start. Its 
 
 The tunnel profile removes the published API port. Postgres remains on `127.0.0.1:5432` from the base file. That bind is not a public interface. Do not add a `0.0.0.0` publish.
 
-The origin-pull profile publishes TCP 443. Close 80. On the host firewall, allow 443 only from the same Cloudflare ranges. The Caddyfile rejects any other peer before the proxy, and it requires the Origin Pull client certificate.
+The origin-pull profile publishes TCP 443. Close 80. On the host firewall, allow 443 only from the same Cloudflare ranges. The Caddyfile rejects any other peer before the proxy, and it requires a client certificate signed by this zone's CA.
 
 `infra/caddy/Caddyfile.api-only` reads the client IP only from `CF-Connecting-IP`, and only when `trusted_proxies_strict` accepts the peer. It then deletes `X-Forwarded-For` and the other forwarding headers and sets one `X-Forwarded-For` and one `CF-Connecting-IP` to `{client_ip}`. A client-supplied chain does not survive. The two CIDR lists in that file are the same list. Refresh them together when Cloudflare publishes new ranges.
 
-The global Origin Pull CA proves the caller is some Cloudflare zone, not specifically yours. For a certificate only your account can present, create a zone-level Authenticated Origin Pull CA and replace the `trust_pool` file. Tunnel mode does not use Origin Pulls. The tunnel credential is the authentication.
+Do not install the global Origin Pull CA from `authenticated_origin_pull_ca.pem`. That CA is shared by every Cloudflare zone. Another customer who can connect from a Cloudflare IP would pass the certificate check and skip this zone's Worker WAF. The IP allowlist does not stop that. Tunnel mode does not use Origin Pulls. The tunnel credential is the authentication, and it is the setup to use.
+
+Zone-level Authenticated Origin Pulls uses a CA that only this zone presents. Generate it on a machine that is not the public VPS. Upload the leaf to Cloudflare. Keep the CA key off the VPS. Copy only `rootca.crt` to the VPS.
+
+```bash
+openssl genrsa -aes256 -out rootca.key 4096
+openssl req -x509 -new -nodes -key rootca.key -sha256 -days 1826 -out rootca.crt
+openssl req -new -nodes -out cert.csr -newkey rsa:4096 -keyout cert.key
+printf 'basicConstraints=CA:FALSE\n' > cert.v3.ext
+openssl x509 -req -in cert.csr -CA rootca.crt -CAkey rootca.key -CAcreateserial -out cert.crt -days 730 -sha256 -extfile cert.v3.ext
+```
+
+In the dashboard, open SSL/TLS, Origin Server, Authenticated Origin Pulls. Under Zone-level, upload `cert.crt` and `cert.key`. The upload rejects a CA that has no leaf. Turn zone-level Authenticated Origin Pulls on. Leave the global toggle off.
+
+Copy `rootca.crt` to `infra/caddy/certs/cloudflare-zone-origin-pull-ca.pem` on the VPS before `docker compose up`. That filename is gitignored. The compose file mounts it at `/etc/caddy/certs/cloudflare-zone-origin-pull-ca.pem`. Paths in the overlay are relative to `docker/`, because `docker/docker-compose.vps.yml` is the first `-f` file. If the CA file is missing, Compose creates a directory at that path and Caddy does not start cleanly. Do not commit the CA, `rootca.key`, or `cert.key`.
 
 ## API patch after Slice 1.1
 

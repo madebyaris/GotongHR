@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "test": "node --experimental-strip-types --test --test-reporter spec worker/*.test.ts",
     "preview": "vite preview",
-    "deploy": "pnpm build && wrangler deploy"
+    "deploy": "pnpm typecheck && pnpm test && pnpm build && wrangler deploy"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",

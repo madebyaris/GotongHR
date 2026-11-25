@@ -1,9 +1,10 @@
-# API-only origin behind Cloudflare.
-# TLS is the Cloudflare Origin Certificate. Authenticated Origin Pulls checks the
-# client certificate. The peer must also be in the Cloudflare IP list.
+# API-only origin behind Cloudflare. Prefer the tunnel profile. This file is the
+# public HTTPS origin, and it is off unless the origin-pull profile is started.
+# TLS is a Cloudflare Origin Certificate for this hostname.
+# The client certificate must be signed by this zone's Authenticated Origin Pull CA.
+# Do not trust the global Cloudflare Origin Pull CA. Every customer can present it.
+# The peer must also be in the Cloudflare IP list. The IP list alone is not enough.
 # Lists fetched 2026-11-25 from https://www.cloudflare.com/ips-v4 and /ips-v6.
-# CA: https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem
-# The global CA is shared by every Cloudflare account. It expires 2029-11-01.
 {
 	admin off
 	auto_https disable_certs
@@ -44,7 +45,7 @@
 		protocols tls1.2 tls1.3
 		client_auth {
 			mode require_and_verify
-			trust_pool file /etc/caddy/certs/cloudflare-origin-pull-ca.pem
+			trust_pool file /etc/caddy/certs/cloudflare-zone-origin-pull-ca.pem
 		}
 	}
 

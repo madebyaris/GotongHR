@@ -14,7 +14,7 @@
       }
     },
     {
-      "description": "Edge-cache content-hashed Vite assets for one year. Session cookies do not bypass this rule.",
+      "description": "Edge-cache HTTP 200 hashed Vite assets for one year. status_code_ttl 0 is no-cache for 4xx and 5xx, so a removed file is not stored for a year. Browser TTL follows the origin _headers. Session cookies do not bypass this rule.",
       "expression": "(starts_with(http.request.uri.path, \"/assets/\"))",
       "action": "set_cache_settings",
       "enabled": true,
@@ -22,11 +22,30 @@
         "cache": true,
         "edge_ttl": {
           "mode": "override_origin",
-          "default": 31536000
+          "default": 0,
+          "status_code_ttl": [
+            {
+              "status_code": 200,
+              "value": 31536000
+            },
+            {
+              "status_code_range": {
+                "from": 400,
+                "to": 499
+              },
+              "value": 0
+            },
+            {
+              "status_code_range": {
+                "from": 500,
+                "to": 599
+              },
+              "value": 0
+            }
+          ]
         },
         "browser_ttl": {
-          "mode": "override_origin",
-          "default": 31536000
+          "mode": "respect_origin"
         }
       }
     },

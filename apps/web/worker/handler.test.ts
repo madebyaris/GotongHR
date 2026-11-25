@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PRIVATE_NO_STORE, SECURITY_HEADERS } from "./headers.ts";
-import { handleRequest, type WorkerEnv } from "./index.ts";
+import { ALLOWED_METHODS, handleRequest, type WorkerEnv } from "./index.ts";
+import { UPSTREAM_TIMEOUT_MS } from "./proxy.ts";
 
 const ASSETS: WorkerEnv["ASSETS"] = {
   fetch: () => Promise.reject(new Error("ASSETS binding should not be used directly")),
@@ -14,6 +15,8 @@ function env(partial: Omit<WorkerEnv, "ASSETS">): WorkerEnv {
 test("proxy forwards /api to API_ORIGIN and strips a spoofed X-Forwarded-For", async () => {
   let seenUrl = "";
   let seen: Headers | undefined;
+  let seenBody = "";
+  let seenSignal: AbortSignal | undefined;
   const response = await handleRequest(
     new Request("https://hr.example.co.id/api/readyz?probe=1", {
       method: "POST",
@@ -35,6 +38,8 @@ test("proxy forwards /api to API_ORIGIN and strips a spoofed X-Forwarded-For", a
       upstream: (input, init) => {
         seenUrl = input;
         seen = new Headers(init.headers);
+        seenSignal = init.signal ?? undefined;
+        if (init.body instanceof ArrayBuffer) seenBody = new TextDecoder().decode(init.body);
         return Promise.resolve(
           new Response('{"data":{"status":"ready"}}', {
             status: 200,
@@ -61,6 +66,9 @@ test("proxy forwards /api to API_ORIGIN and strips a spoofed X-Forwarded-For", a
   assert.equal(seen?.get("x-forwarded-host"), "hr.example.co.id");
   assert.equal(seen?.get("x-forwarded-proto"), "https");
   assert.equal(seen?.get("x-forwarded-for")?.includes("1.2.3.4"), false);
+  assert.equal(seenBody, JSON.stringify({ ok: true }));
+  assert.equal(seenSignal instanceof AbortSignal, true);
+  assert.equal(UPSTREAM_TIMEOUT_MS, 30_000);
 });
 
 test("a missing or non-HTTPS API_ORIGIN is not proxied in production", async () => {
@@ -217,6 +225,7 @@ test("a disallowed method is refused before the origin is called", async () => {
   );
   assert.equal(response.status, 405);
   assert.equal(response.headers.get("cache-control"), PRIVATE_NO_STORE);
+  assert.equal(response.headers.get("allow"), ALLOWED_METHODS.join(", "));
   assert.equal(calls, 0);
 });
 
@@ -237,6 +246,52 @@ test("an upstream redirect is returned to the browser", async () => {
   );
   assert.equal(response.status, 302);
   assert.equal(response.headers.get("location"), "https://hr.example.co.id/ess");
+});
+
+test("an unreachable API origin returns 502 without storing the response", async () => {
+  const response = await handleRequest(
+    new Request("https://hr.example.co.id/api/readyz"),
+    env({ API_ORIGIN: "https://origin.example.co.id", ENVIRONMENT: "production" }),
+    {
+      assets: () => Promise.reject(new Error("assets")),
+      upstream: () => Promise.reject(new TypeError("fetch failed")),
+    },
+  );
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("cache-control"), PRIVATE_NO_STORE);
+});
+
+test("a chunked body over 2 MB is cancelled before the origin is called", async () => {
+  let calls = 0;
+  let cancelled = false;
+  const chunk = new Uint8Array(64 * 1024);
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const response = await handleRequest(
+    new Request("https://hr.example.co.id/api/readyz", {
+      method: "POST",
+      body: stream,
+      duplex: "half",
+    }),
+    env({ API_ORIGIN: "https://origin.example.co.id", ENVIRONMENT: "production" }),
+    {
+      assets: () => Promise.reject(new Error("assets")),
+      upstream: () => {
+        calls += 1;
+        return Promise.resolve(new Response("no"));
+      },
+    },
+  );
+  assert.equal(response.status, 413);
+  assert.equal(response.headers.get("cache-control"), PRIVATE_NO_STORE);
+  assert.equal(calls, 0);
+  assert.equal(cancelled, true);
 });
 
 test("a body over 2 MB is refused", async () => {

@@ -7,6 +7,9 @@
 #
 # Tunnel profile publishes no host ports. Postgres stays on 127.0.0.1:5432 from the
 # base file. The API port is removed so a local process cannot skip the proxy.
+#
+# Volume paths resolve from docker/, because docker/docker-compose.vps.yml is the
+# first -f file. ../infra/caddy is this repo's infra/caddy directory.
 
 services:
   caddy:
@@ -63,8 +66,8 @@ services:
     ports:
       - "443:443"
     volumes:
-      - ../caddy/Caddyfile.api-only:/etc/caddy/Caddyfile:ro
-      - ../caddy/certs/cloudflare-origin-pull-ca.pem:/etc/caddy/certs/cloudflare-origin-pull-ca.pem:ro
+      - ../infra/caddy/Caddyfile.api-only:/etc/caddy/Caddyfile:ro
+      - ../infra/caddy/certs/cloudflare-zone-origin-pull-ca.pem:/etc/caddy/certs/cloudflare-zone-origin-pull-ca.pem:ro
       - ${ORIGIN_CERT_PATH:-./origin.pem}:/etc/caddy/certs/origin.pem:ro
       - ${ORIGIN_KEY_PATH:-./origin.key}:/etc/caddy/certs/origin.key:ro
     depends_on:

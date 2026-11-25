@@ -1,7 +1,9 @@
 import { errorResponse, withSecurityHeaders, PRIVATE_NO_STORE } from "./headers.ts";
 import { isApiPath, isAuthPath, proxyApi } from "./proxy.ts";
 
-const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+export const ALLOWED_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
+
+const ALLOWED_METHOD_SET = new Set<string>(ALLOWED_METHODS);
 
 export interface WorkerEnv {
   ASSETS: {
@@ -21,8 +23,10 @@ export async function handleRequest(
   env: WorkerEnv,
   deps: HandlerDeps,
 ): Promise<Response> {
-  if (!ALLOWED_METHODS.has(request.method)) {
-    return errorResponse(405, "method_not_allowed", "Method not allowed.");
+  if (!ALLOWED_METHOD_SET.has(request.method)) {
+    return errorResponse(405, "method_not_allowed", "Method not allowed.", {
+      allow: ALLOWED_METHODS.join(", "),
+    });
   }
 
   const url = new URL(request.url);

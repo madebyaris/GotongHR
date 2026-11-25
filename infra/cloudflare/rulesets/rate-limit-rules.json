@@ -62,8 +62,8 @@
       }
     },
     {
-      "description": "Clock-in. 180 requests per minute per office IP covers 30 people at 08:00 WIB with status checks and retries. The full budget can arrive in the first seconds. mitigation_timeout is 10 seconds so a burst over the cap recovers before the next wave.",
-      "expression": "(starts_with(http.request.uri.path, \"/api/attendance/clock\") or starts_with(http.request.uri.path, \"/api/v1/attendance/clock\") or starts_with(http.request.uri.path, \"/api/v1/mobile/clock\"))",
+      "description": "Office clock-in. 180 requests per minute per office IP covers 30 people at 08:00 WIB with status checks and retries. The full budget can arrive in the first seconds. mitigation_timeout is 10 seconds so a burst over the cap recovers before the next wave. /api/v1/mobile/clock is omitted: carrier CGNAT shares one IP across unrelated subscribers, and that route is limited per user in the API.",
+      "expression": "(starts_with(http.request.uri.path, \"/api/attendance/clock\") or starts_with(http.request.uri.path, \"/api/v1/attendance/clock\"))",
       "action": "block",
       "enabled": true,
       "ratelimit": {
