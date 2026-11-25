@@ -8,8 +8,8 @@ import { bpjsComponent } from "./component.ts";
  * JKM is no longer recomposed, so that part is zero.
  * A regulation change to this split or this cap stays in this file.
  * Each part rounds half up. The total is the sum of those parts, so the parts add up.
- * This amount is a memo. It is not added to the employer or employee payable totals.
- * The employer still remits the full JKK risk rate and the full JKM rate.
+ * calculateBpjs adds fromJkk to the employer payable when the worker is eligible.
+ * The government part is not a remittance. JKM stays at its own full rate.
  */
 export const JKP_WAGE_CAP = 5_000_000n;
 

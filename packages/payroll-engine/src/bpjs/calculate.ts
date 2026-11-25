@@ -1,6 +1,6 @@
 import type { Idr } from "@gotonghr/contracts";
 import { PayrollInputError } from "../errors.ts";
-import { sumRupiah } from "../money.ts";
+import { rupiah, sumRupiah } from "../money.ts";
 import { assertReadyForCalculation } from "../tables/select.ts";
 import type { StatutoryTable } from "../tables/types.ts";
 import { calculateJkk, type JkkResult } from "./jkk.ts";
@@ -15,6 +15,7 @@ export interface CalculateBpjsInput {
   readonly applyWageFloor: boolean;
   readonly umpUmk?: bigint;
   readonly jkkRiskClass: number;
+  readonly jkpEligible?: boolean;
   readonly table: StatutoryTable;
   readonly allowUndeclared?: boolean;
 }
@@ -35,8 +36,10 @@ export interface CalculateBpjsResult {
 /**
  * BPJS for one wage. Kesehatan is capped at Rp12,000,000 after the UMP or UMK floor.
  * JP reads the table cap and throws MissingStatutoryValueError when that cap is missing.
- * JKK, JKM, and JHT use the floored wage. JKP caps that wage inside jkp.ts.
- * Payable totals omit JKP. The employer already remits full JKK and full JKM.
+ * JKM and JHT use the floored wage. JKK does too.
+ * jkpEligible defaults to true. The employer then pays the reduced JKK rate
+ * plus jkp.fromJkk, and the government part stays out of employerPayable.
+ * jkpEligible false keeps the headline JKK rate and a zero JKP memo.
  * A draft table is refused unless allowUndeclared is set.
  */
 export function calculateBpjs(input: CalculateBpjsInput): CalculateBpjsResult {
@@ -47,13 +50,14 @@ export function calculateBpjs(input: CalculateBpjsInput): CalculateBpjsResult {
     input.table,
     input.allowUndeclared === true ? { allowUndeclared: true } : undefined,
   );
+  const jkpEligible = readJkpEligible(input.jkpEligible);
   const { reportedWage, flooredWage } = resolveWageBasis(input);
   const kesehatan = calculateKesehatan(flooredWage, input.additionalFamilyMembers);
   const jht = calculateJht(flooredWage);
-  const jkk = calculateJkk(flooredWage, input.jkkRiskClass);
+  const jkk = calculateJkk(flooredWage, input.jkkRiskClass, jkpEligible);
   const jkm = calculateJkm(flooredWage);
   const jp = calculateJp(flooredWage, input.table);
-  const jkp = jkpRecomposition(flooredWage);
+  const jkp = jkpEligible ? jkpRecomposition(flooredWage) : zeroJkp();
   return {
     reportedWage,
     flooredWage,
@@ -69,7 +73,27 @@ export function calculateBpjs(input: CalculateBpjsInput): CalculateBpjsResult {
       jkk.employer,
       jkm.employer,
       jp.employer,
+      jkp.fromJkk,
     ]),
     employeePayable: sumRupiah([kesehatan.employee, jht.employee, jp.employee]),
+  };
+}
+
+function readJkpEligible(value: boolean | undefined): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== "boolean") {
+    throw new PayrollInputError("jkpEligible must be true or false.");
+  }
+  return value;
+}
+
+function zeroJkp(): JkpRecomposition {
+  const zero = rupiah(0n);
+  return {
+    wageBasis: zero,
+    government: zero,
+    fromJkk: zero,
+    fromJkm: zero,
+    total: zero,
   };
 }

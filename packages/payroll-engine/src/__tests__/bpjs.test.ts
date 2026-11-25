@@ -120,7 +120,7 @@ test("a floor above the Kesehatan cap still caps Kesehatan and leaves JHT on the
   assert.equal(result.jht.employer, 481_000n);
   assert.equal(result.jp.wageBasis, 13_000_000n);
   assert.equal(result.jp.monthlyWageCap, 20_000_000n);
-  assert.equal(result.jkk.employer, 226_200n);
+  assert.equal(result.jkk.employer, 208_000n);
 });
 
 test("JHT is 3.7 and 2 percent, and JKM is 0.3 percent employer", () => {
@@ -131,14 +131,24 @@ test("JHT is 3.7 and 2 percent, and JKM is 0.3 percent employer", () => {
   assert.equal(result.jkm.employee, 0n);
 });
 
-test("all 5 JKK risk classes use 0.24, 0.54, 0.89, 1.27, and 1.74 percent", () => {
-  const expected = [24_000n, 54_000n, 89_000n, 127_000n, 174_000n];
+test("JKK uses the reduced rates when JKP applies and the headline rates when it does not", () => {
+  const reduced = [10_000n, 40_000n, 75_000n, 113_000n, 160_000n];
+  const headline = [24_000n, 54_000n, 89_000n, 127_000n, 174_000n];
   assert.deepEqual(jkkRiskClasses, [1, 2, 3, 4, 5]);
   for (const riskClass of jkkRiskClasses) {
-    const result = bpjs({ wage: 10_000_000n, jkkRiskClass: riskClass });
-    assert.equal(result.jkk.riskClass, riskClass);
-    assert.equal(result.jkk.employer, expected[riskClass - 1]);
-    assert.equal(result.jkk.employee, 0n);
+    const eligible = bpjs({ wage: 10_000_000n, jkkRiskClass: riskClass });
+    const ineligible = bpjs({
+      wage: 10_000_000n,
+      jkkRiskClass: riskClass,
+      jkpEligible: false,
+    });
+    assert.equal(eligible.jkk.riskClass, riskClass);
+    assert.equal(eligible.jkk.employer, reduced[riskClass - 1]);
+    assert.equal(eligible.jkk.employee, 0n);
+    assert.equal(ineligible.jkk.employer, headline[riskClass - 1]);
+    assert.equal(ineligible.jkk.employee, 0n);
+    assert.equal(eligible.jkk.wageBasis, 10_000_000n);
+    assert.equal(ineligible.jkk.wageBasis, 10_000_000n);
   }
 });
 
@@ -226,7 +236,7 @@ test("a present JP cap of zero ceilings the JP wage at zero", () => {
   assert.equal(result.jht.employer, 185_000n);
 });
 
-test("JKP is 0.36 percent, capped at Rp5,000,000, and payable totals omit it", () => {
+test("JKP is 0.36 percent of wages capped at Rp5,000,000", () => {
   assert.equal(JKP_WAGE_CAP, 5_000_000n);
   assert.equal(
     jkpRecompositionParts.governmentPerScale +
@@ -249,11 +259,67 @@ test("JKP is 0.36 percent, capped at Rp5,000,000, and payable totals omit it", (
   assert.equal(jkpRecomposition(5_000_000n).wageBasis, 5_000_000n);
   assert.equal(jkpRecomposition(5_000_001n).wageBasis, 5_000_000n);
   assert.equal(jkpRecomposition(4_000_000n).total, 14_400n);
-  assert.equal(result.jkk.employer, 89_000n);
+  assert.equal(result.jkk.employer, 75_000n);
   assert.equal(result.jkm.employer, 30_000n);
   assert.equal(result.kesehatan.additionalFamilyEmployee, 100_000n);
   assert.equal(result.kesehatan.employer, 400_000n);
   assert.equal(result.kesehatan.employee, 200_000n);
+  assert.equal(result.employerPayable, 1_082_000n);
+  assert.equal(result.employeePayable, 500_000n);
+  assert.equal(
+    result.employerPayable,
+    result.kesehatan.employer +
+      result.jht.employer +
+      result.jkk.employer +
+      result.jkm.employer +
+      result.jp.employer +
+      result.jkp.fromJkk,
+  );
+});
+
+test("JKK plus JKP from JKK equals the headline rate at or under Rp5,000,000", () => {
+  for (const wage of [4_000_000n, 5_000_000n]) {
+    for (const riskClass of jkkRiskClasses) {
+      const eligible = bpjs({ wage, jkkRiskClass: riskClass, jkpEligible: true });
+      const omitted = bpjs({ wage, jkkRiskClass: riskClass });
+      const headline = bpjs({ wage, jkkRiskClass: riskClass, jkpEligible: false });
+      assert.equal(eligible.jkp.wageBasis, wage);
+      assert.equal(eligible.jkk.employer + eligible.jkp.fromJkk, headline.jkk.employer);
+      assert.equal(eligible.employerPayable, headline.employerPayable);
+      assert.equal(omitted.jkk.employer, eligible.jkk.employer);
+      assert.equal(omitted.jkp.fromJkk, eligible.jkp.fromJkk);
+    }
+  }
+});
+
+test("JKP from JKK stays on the Rp5,000,000 cap when the wage is higher", () => {
+  const wage = 10_000_000n;
+  for (const riskClass of jkkRiskClasses) {
+    const eligible = bpjs({ wage, jkkRiskClass: riskClass });
+    const headline = bpjs({ wage, jkkRiskClass: riskClass, jkpEligible: false });
+    assert.equal(eligible.jkp.wageBasis, 5_000_000n);
+    assert.equal(eligible.jkp.fromJkk, 7_000n);
+    assert.equal(eligible.jkp.government, 11_000n);
+    assert.equal(eligible.jkk.employer + eligible.jkp.fromJkk, headline.jkk.employer - 7_000n);
+    assert.equal(eligible.employerPayable, headline.employerPayable - 7_000n);
+    assert.equal(eligible.employeePayable, headline.employeePayable);
+  }
+});
+
+test("a worker outside JKP pays the headline JKK rate and no JKP", () => {
+  const result = bpjs({
+    wage: 10_000_000n,
+    jkkRiskClass: 3,
+    additionalFamilyMembers: 1,
+    jkpEligible: false,
+  });
+  assert.equal(result.jkk.employer, 89_000n);
+  assert.equal(result.jkp.wageBasis, 0n);
+  assert.equal(result.jkp.government, 0n);
+  assert.equal(result.jkp.fromJkk, 0n);
+  assert.equal(result.jkp.fromJkm, 0n);
+  assert.equal(result.jkp.total, 0n);
+  assert.equal(result.jkm.employer, 30_000n);
   assert.equal(result.employerPayable, 1_089_000n);
   assert.equal(result.employeePayable, 500_000n);
 });
@@ -274,7 +340,7 @@ test("JKP recomposition rates live only in jkp.ts", () => {
   assert.ok(files.includes("jkk.ts"));
   for (const name of files) {
     const source = readFileSync(path.join(bpjsDir, name), "utf8");
-    assert.doesNotMatch(source, /22n|14n|10n|46n|0\.46|0\.22|0\.14|0\.10/, name);
+    assert.doesNotMatch(source, /22n|14n|46n|0\.46|0\.22|0\.14|0\.10/, name);
   }
   const jkp = readFileSync(path.join(bpjsDir, "jkp.ts"), "utf8");
   assert.match(jkp, /22n/);
@@ -289,6 +355,7 @@ test("BPJS rejects negative wage, a bad risk class, and a missing floor", () => 
   assert.throws(() => bpjs({ wage: 1n, additionalFamilyMembers: 1.5 }), PayrollInputError);
   assert.throws(() => bpjs({ wage: 1n, jkkRiskClass: 0 }), PayrollInputError);
   assert.throws(() => bpjs({ wage: 1n, jkkRiskClass: 6 }), PayrollInputError);
+  assert.throws(() => bpjs({ wage: 1n, jkpEligible: "no" as never }), PayrollInputError);
   assert.throws(() => bpjs({ wage: 1n, applyWageFloor: true }), PayrollInputError);
   assert.throws(
     () => bpjs({ wage: 1n, applyWageFloor: true, umpUmk: -1n }),
