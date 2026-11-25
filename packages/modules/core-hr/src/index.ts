@@ -11,7 +11,7 @@ export { registerEmployeeImports } from "./imports/routes.ts";
 export type { EmployeeImportRouteDeps } from "./imports/routes.ts";
 export { migrateCoreHr } from "./migrate.ts";
 export type { CoreHrMigrateInput } from "./migrate.ts";
-export { compensationEffectiveOn } from "./org/compensation.ts";
+export { appendCompensation, compensationEffectiveOn } from "./org/compensation.ts";
 export type { EffectiveCompensation } from "./org/compensation.ts";
 export { scanContractExpiry } from "./org/expiry.ts";
 export { migrateOrg } from "./org/migrate.ts";

@@ -58,7 +58,10 @@ const requiredTenantTables = [
   "id_roles",
   "id_sessions",
   "id_users",
+  "pay_exports",
   "pay_run",
+  "pay_run_items",
+  "pay_runs",
   "rls_probe",
   "sys_support_grants",
 ] as const;
@@ -89,7 +92,10 @@ const platformDeniedTables = [
   "hr_positions",
   "hr_secret",
   "att_secret",
+  "pay_exports",
   "pay_run",
+  "pay_run_items",
+  "pay_runs",
   "id_memberships",
   "id_legal_entities",
   "id_branches",
@@ -286,6 +292,9 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       "ai_conversations",
       "att_secret",
       "hr_secret",
+      "pay_exports",
+      "pay_run_items",
+      "pay_runs",
       "pay_run",
       "rls_probe",
       "id_sessions",
@@ -355,6 +364,9 @@ describe("tenant isolation", { concurrency: 1 }, () => {
     }
     await assertPermissionDenied(platform, "SELECT id FROM hr_documents");
     await assertPermissionDenied(platform, "SELECT id FROM hr_import_jobs");
+    await assertPermissionDenied(platform, "SELECT id FROM pay_runs");
+    await assertPermissionDenied(platform, "SELECT id FROM pay_run_items");
+    await assertPermissionDenied(platform, "SELECT id FROM pay_exports");
   });
 
   it("rejects UPDATE, DELETE, and TRUNCATE on append-only audit tables", async () => {
@@ -685,6 +697,12 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const attB = randomUUID();
   const payA = randomUUID();
   const payB = randomUUID();
+  const payRunA = randomUUID();
+  const payRunB = randomUUID();
+  const payItemA = randomUUID();
+  const payItemB = randomUUID();
+  const payExportA = randomUUID();
+  const payExportB = randomUUID();
   const employeeA = randomUUID();
   const employeeB = randomUUID();
   const employeePiiA = randomUUID();
@@ -1001,6 +1019,41 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       [payA, payB, tenantA, tenantB],
     );
     await superuser.query(
+      `INSERT INTO pay_runs (id, tenant_id, legal_entity_id, period_year_month) VALUES
+         ($1, $3, $5, '2026-01'),
+         ($2, $4, $6, '2026-01')`,
+      [payRunA, payRunB, tenantA, tenantB, entityA, entityB],
+    );
+    await superuser.query(
+      `INSERT INTO pay_run_items (
+         id, tenant_id, run_id, employee_id,
+         employee_snapshot_json, attendance_snapshot_json, earnings_json, deductions_json,
+         bpjs_json, pph21_json, gross_idr, tax_idr, net_idr
+       ) VALUES
+         ($1, $3, $5, $7, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0),
+         ($2, $4, $6, $8, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0)`,
+      [payItemA, payItemB, tenantA, tenantB, payRunA, payRunB, employeeA, employeeB],
+    );
+    await superuser.query(
+      `INSERT INTO pay_exports (
+         id, tenant_id, run_id, export_kind, storage_key, checksum_sha256, byte_size
+       ) VALUES
+         ($1, $3, $5, 'coretax', $7, $9, 12),
+         ($2, $4, $6, 'coretax', $8, $10, 12)`,
+      [
+        payExportA,
+        payExportB,
+        tenantA,
+        tenantB,
+        payRunA,
+        payRunB,
+        `t/${tenantA}/payroll/export-a.xml`,
+        `t/${tenantB}/payroll/export-b.xml`,
+        "ab".repeat(32),
+        "cd".repeat(32),
+      ],
+    );
+    await superuser.query(
       `INSERT INTO ai_conversations (id, tenant_id, created_by_user_id, title) VALUES
          ($1, $3, $5, 'a'),
          ($2, $4, $6, 'b')`,
@@ -1162,7 +1215,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["id_roles", { a: roleA, b: roleB }],
       ["id_sessions", { a: idSessionA, b: idSessionB }],
       ["id_users", { a: userA, b: userB }],
+      ["pay_exports", { a: payExportA, b: payExportB }],
       ["pay_run", { a: payA, b: payB }],
+      ["pay_run_items", { a: payItemA, b: payItemB }],
+      ["pay_runs", { a: payRunA, b: payRunB }],
       ["rls_probe", { a: probeA, b: probeB }],
       ["sys_support_grants", { a: grantA, b: grantB }],
     ]),
@@ -1171,6 +1227,9 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
 
 async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   const tenants = [seed.tenantA, seed.tenantB];
+  await superuser.query("DELETE FROM pay_exports WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM pay_run_items WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM pay_runs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM att_rosters WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM att_leave_requests WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM att_leave_balances WHERE tenant_id = ANY($1::uuid[])", [tenants]);

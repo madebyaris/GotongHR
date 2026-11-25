@@ -1,0 +1,36 @@
+{
+  "name": "@gotonghr/payroll",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/audit build && pnpm --filter @gotonghr/payroll-engine build && pnpm --filter @gotonghr/payslip-pdf build && pnpm --filter @gotonghr/storage build",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/*.test.ts"
+  },
+  "dependencies": {
+    "@gotonghr/audit": "workspace:*",
+    "@gotonghr/contracts": "workspace:*",
+    "@gotonghr/db": "workspace:*",
+    "@gotonghr/payroll-engine": "workspace:*",
+    "@gotonghr/payslip-pdf": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "fastify": "5.12.8",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@gotonghr/storage": "workspace:*",
+    "@types/node": "22.20.6",
+    "@types/pg": "8.23.1",
+    "eslint": "10.15.0",
+    "typescript": "5.9.3"
+  }
+}

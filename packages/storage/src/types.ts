@@ -32,6 +32,8 @@ export interface ObjectStat {
 export interface ObjectStorage {
   presignPut(input: PresignPutInput): Promise<PresignedPut>;
   presignGet(input: { key: string; expiresInSeconds?: number }): Promise<PresignedGet>;
+  /** Writes bytes the server generated. Presign is for a browser upload. */
+  put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void>;
   /** Byte stream for one object. Callers read it line by line and do not buffer the object. */
   openRead(input: { key: string }): Promise<AsyncIterable<Uint8Array | string>>;
   stat(input: { key: string }): Promise<ObjectStat | null>;

@@ -22,6 +22,7 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requireAnyPermission,
   requireMember,
   requireOrgWriter,
   requirePermission,
@@ -33,6 +34,7 @@ import {
   readPlatformDatabaseUrl,
   registerPlatform,
 } from "@gotonghr/platform";
+import { registerPayrollRoutes } from "@gotonghr/payroll";
 import { verifyStatutoryPayload } from "./statutory-verifier.ts";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
@@ -43,6 +45,8 @@ import { buildServer } from "./server.ts";
 import { MAINTENANCE_QUEUE, startBoss } from "./queue.ts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sendEmployeeImport, startEmployeeImportWorker } from "./employee-import.ts";
+import { createPayrollAdapters } from "./payroll-adapters.ts";
+import { createPgBossPayrollQueue, startPayrollWorkers } from "./payroll-queue.ts";
 
 export interface ComposedApp {
   app: FastifyInstance;
@@ -95,6 +99,14 @@ export async function composeFromEnv(
     });
     const auth = createAuth({ appDb, env });
     await startEmployeeImportWorker(runningBoss, { appDb, storage });
+    const payrollStorage = {
+      put: (input: { key: string; body: Uint8Array; contentType: string }) => storage.put(input),
+      presignGet: (input: { key: string; expiresInSeconds: number }) =>
+        storage.presignGet({ key: input.key, expiresInSeconds: input.expiresInSeconds }),
+    };
+    await startPayrollWorkers(runningBoss, { appDb, storage: payrollStorage });
+    const payrollAdapters = createPayrollAdapters(appDb);
+    const payrollQueue = createPgBossPayrollQueue(runningBoss);
     const guard = (permission: PermissionAtom) => requirePermission(permission);
     const readAuth = (request: FastifyRequest) => {
       const session = request.gotongAuth;
@@ -143,6 +155,32 @@ export async function composeFromEnv(
           userId: current.userId,
           role: current.role,
           permissions: current.permissions,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
+    });
+    await registerPayrollRoutes(app, {
+      appDb,
+      ...payrollAdapters,
+      queue: payrollQueue,
+      storage: payrollStorage,
+      createGuard: requirePermission("payroll.run.create"),
+      prepareGuard: requirePermission("payroll.run.prepare"),
+      finalizeGuard: requirePermission("payroll.run.finalize"),
+      exportGuard: requireAnyPermission(["payroll.run.prepare", "payroll.coretax.export"]),
+      memberGuard: requireMember(),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
+          employeeId: null,
+          sessionTotpVerified: current.sessionTotpVerified,
           ipAddress: request.ip || null,
           userAgent: typeof agent === "string" ? agent : null,
         };

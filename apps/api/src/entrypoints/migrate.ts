@@ -4,6 +4,7 @@ import { migrateAudit } from "@gotonghr/audit";
 import { migrateCoreHr } from "@gotonghr/core-hr";
 import { applyDatabaseUrls, loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
 import { migrateIdentity } from "@gotonghr/identity";
+import { migratePayroll } from "@gotonghr/payroll";
 import { migratePlatform } from "@gotonghr/platform";
 import { provisionQueue } from "../queue.ts";
 
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
   await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAttendance({ migratorUrl: migrateEnv.migratorUrl });
   await migrateClock({ migratorUrl: migrateEnv.migratorUrl });
+  await migratePayroll({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAi({
     migratorUrl: migrateEnv.migratorUrl,
     superuserUrl: migrateEnv.superuserUrl,

@@ -41,12 +41,18 @@ importers:
       '@gotonghr/core-hr':
         specifier: workspace:*
         version: link:../../packages/modules/core-hr
+      '@gotonghr/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@gotonghr/db':
         specifier: workspace:*
         version: link:../../packages/db
       '@gotonghr/identity':
         specifier: workspace:*
         version: link:../../packages/modules/identity
+      '@gotonghr/payroll':
+        specifier: workspace:*
+        version: link:../../packages/modules/payroll
       '@gotonghr/payroll-engine':
         specifier: workspace:*
         version: link:../../packages/payroll-engine
@@ -56,6 +62,9 @@ importers:
       '@gotonghr/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
       fastify:
         specifier: 5.12.8
         version: 5.12.8
@@ -410,6 +419,49 @@ importers:
         specifier: 5.9.3
         version: 5.9.3
 
+  packages/modules/payroll:
+    dependencies:
+      '@gotonghr/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@gotonghr/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@gotonghr/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@gotonghr/payroll-engine':
+        specifier: workspace:*
+        version: link:../../payroll-engine
+      '@gotonghr/payslip-pdf':
+        specifier: workspace:*
+        version: link:../../payslip-pdf
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(kysely@0.29.9)(pg@8.23.1)
+      fastify:
+        specifier: 5.12.8
+        version: 5.12.8
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@gotonghr/storage':
+        specifier: workspace:*
+        version: link:../../storage
+      '@types/node':
+        specifier: 22.20.6
+        version: 22.20.6
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      eslint:
+        specifier: 10.15.0
+        version: 10.15.0(jiti@2.7.0)
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   packages/modules/platform:
     dependencies:
       '@gotonghr/contracts':
@@ -449,6 +501,9 @@ importers:
       '@gotonghr/identity':
         specifier: workspace:*
         version: link:../identity
+      '@gotonghr/payroll':
+        specifier: workspace:*
+        version: link:../payroll
       '@types/node':
         specifier: 22.20.6
         version: 22.20.6

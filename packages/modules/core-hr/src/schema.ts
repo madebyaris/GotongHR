@@ -27,6 +27,8 @@ export const hrEmployees = pgTable(
     positionId: uuid("position_id"),
     managerEmployeeId: uuid("manager_employee_id"),
     employmentStatus: text("employment_status").notNull(),
+    userId: uuid("user_id"),
+    dateOfBirth: date("date_of_birth", { mode: "string" }),
     joinDate: date("join_date", { mode: "string" }).notNull(),
     ptkpStatus: text("ptkp_status").notNull(),
     taxMethod: text("tax_method").notNull(),
@@ -37,6 +39,9 @@ export const hrEmployees = pgTable(
   (table) => [
     uniqueIndex("hr_employees_id_tenant_uidx").on(table.id, table.tenantId),
     uniqueIndex("hr_employees_code_key").on(table.tenantId, table.employeeCode),
+    uniqueIndex("hr_employees_user_key")
+      .on(table.tenantId, table.userId)
+      .where(sql`user_id IS NOT NULL`),
     index("hr_employees_tenant_branch_idx").on(table.tenantId, table.branchId),
   ],
 );

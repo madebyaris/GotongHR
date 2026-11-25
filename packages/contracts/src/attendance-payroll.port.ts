@@ -15,4 +15,15 @@ export interface AttendancePayrollPort {
     periodYear: number;
     periodMonth: number;
   }): Promise<AttendancePeriodSummaryDTO[]>;
+  /**
+   * Writes `locked_for_payroll_run_id` on locked daily summaries for the period.
+   * The payroll module does not touch attendance tables itself.
+   */
+  attachPayrollRun(input: {
+    tenantId: string;
+    legalEntityId: string;
+    periodYear: number;
+    periodMonth: number;
+    runId: string;
+  }): Promise<{ attached: number }>;
 }

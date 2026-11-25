@@ -137,6 +137,26 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
         headers: { "content-type": input.contentType },
       };
     },
+    async put(input) {
+      assertObjectKey(input.key);
+      if (input.contentType.trim().length === 0) {
+        throw new Error("Content type is required.");
+      }
+      if (input.body.byteLength > MAX_UPLOAD_BYTES) {
+        throw new Error("Upload cap cannot exceed 2 MB.");
+      }
+      const destination = resolveObjectPath(rootDir, input.key);
+      const staging = await ensureStagingDirectory(rootDir);
+      const temporary = path.join(staging, `${randomBytes(16).toString("hex")}.partial`);
+      await mkdir(path.dirname(destination), { recursive: true });
+      try {
+        await writeFile(temporary, input.body);
+        await rename(temporary, destination);
+      } catch (error) {
+        await rm(temporary, { force: true });
+        throw error;
+      }
+    },
     async presignGet(input) {
       assertObjectKey(input.key);
       const token = signToken(

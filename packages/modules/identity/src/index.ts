@@ -31,6 +31,7 @@ export type { TrustProxySetting } from "./proxy-address.ts";
 export { SingleTenantOccupiedError } from "./errors.ts";
 export {
   authenticateRequest,
+  requireAnyPermission,
   requireMember,
   requireOrgWriter,
   requirePermission,

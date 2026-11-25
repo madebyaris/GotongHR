@@ -31,6 +31,7 @@
     "@gotonghr/core-hr": "workspace:*",
     "@gotonghr/crypto": "workspace:*",
     "@gotonghr/identity": "workspace:*",
+    "@gotonghr/payroll": "workspace:*",
     "@types/node": "22.20.6",
     "@types/pg": "8.23.1",
     "eslint": "10.15.0",
