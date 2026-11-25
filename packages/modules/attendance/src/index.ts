@@ -1,6 +1,7 @@
 /**
  * Schedules, leave, and overtime live in src/schedules.
  * Clock events live in src/clock.
+ * The anomaly inbox lives in src/anomalies and reads those punches.
  */
 export type { AttendanceCaller } from "./schedules/auth.ts";
 export { migrateAttendance } from "./schedules/migrate.ts";
@@ -24,3 +25,11 @@ export {
   registerClockRoutes,
 } from "./clock/index.ts";
 export type { ClockCaller, ClockMigrateInput, ClockRouteDeps } from "./clock/index.ts";
+export { migrateAnomalies, registerAnomalyRoutes, listPendingAnomalies, reviewAnomaly } from "./anomalies/index.ts";
+export type {
+  AnomalyCaller,
+  AnomalyMigrateInput,
+  AnomalyRouteDeps,
+  PendingAnomaly,
+  ReviewedAnomaly,
+} from "./anomalies/index.ts";

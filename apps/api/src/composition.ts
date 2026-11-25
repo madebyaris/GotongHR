@@ -1,4 +1,4 @@
-import { registerAttendanceRoutes, registerClockRoutes } from "@gotonghr/attendance";
+import { registerAnomalyRoutes, registerAttendanceRoutes, registerClockRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor, PermissionAtom } from "@gotonghr/contracts";
 import {
@@ -197,6 +197,24 @@ export async function composeFromEnv(
           tenantId: auth.tenantId,
           userId: auth.userId,
           scopeBranchIds: auth.scopeBranchIds,
+        };
+      },
+    });
+    await registerAnomalyRoutes(app, {
+      database: appDb,
+      guard: requirePermission("attendance.approve"),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
+          scopeBranchIds: current.scopeBranchIds,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
         };
       },
     });

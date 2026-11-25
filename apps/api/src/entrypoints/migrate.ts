@@ -1,5 +1,5 @@
 import { migrateAi } from "@gotonghr/ai";
-import { migrateAttendance, migrateClock } from "@gotonghr/attendance";
+import { migrateAnomalies, migrateAttendance, migrateClock } from "@gotonghr/attendance";
 import { migrateAudit } from "@gotonghr/audit";
 import { migrateCoreHr } from "@gotonghr/core-hr";
 import { applyDatabaseUrls, loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAttendance({ migratorUrl: migrateEnv.migratorUrl });
   await migrateClock({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateAnomalies({ migratorUrl: migrateEnv.migratorUrl });
   await migratePayroll({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAi({
     migratorUrl: migrateEnv.migratorUrl,
