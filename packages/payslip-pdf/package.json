@@ -1,0 +1,28 @@
+{
+  "name": "@gotonghr/payslip-pdf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "node --experimental-strip-types --test --test-reporter spec src/*.test.ts"
+  },
+  "dependencies": {
+    "pdfkit": "0.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.6",
+    "@types/pdfkit": "0.17.7",
+    "eslint": "10.15.0",
+    "pdfjs-dist": "6.5.438",
+    "typescript": "5.9.3"
+  }
+}

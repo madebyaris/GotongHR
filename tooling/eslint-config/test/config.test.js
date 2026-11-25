@@ -30,4 +30,11 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
   assert.match(payroll, /@gotonghr\/storage/);
   assert.match(payroll, /pg\/\*/);
   assert.match(payroll, /@fastify\/\*/);
+
+  const payslip = JSON.stringify(entry("packages/payslip-pdf").rules["no-restricted-imports"]);
+  assert.match(payslip, /packages\/payslip-pdf does no database work/);
+  assert.match(payslip, /packages\/payslip-pdf does not use Chromium/);
+  assert.match(payslip, /@gotonghr\/storage/);
+  assert.match(payslip, /puppeteer/);
+  assert.match(payslip, /node:https/);
 });

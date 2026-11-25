@@ -49,8 +49,9 @@ Use the command named for the slice. Do not invent a replacement.
 | 0.2 | `pnpm --filter @gotonghr/db test` |
 | 0.3 | `pnpm --filter @gotonghr/api test` and `docker compose --env-file .env -f docker/docker-compose.vps.yml up -d postgres api` |
 | 0.4 | `pnpm --filter @gotonghr/web build`, `node apps/web/scripts/bundle-budget.mjs`, and `docker compose --env-file .env -f docker/docker-compose.vps.yml -f docker/docker-compose.vps.1g.yml up -d` |
+| 4.4 | `pnpm --filter @gotonghr/payslip-pdf test` |
 | Every later slice | The shared check, depcruise, and the slice command in the implementation plan |
 
 ## Stack
 
-Node 22.13 or newer, pnpm, Turborepo, Vite, Fastify, PostgreSQL 18. Do not add Next.js, Redis, Prisma, or a headless browser. Money is integer rupiah in `bigint`. `packages/payroll-engine` does no database, network, or LLM work. Modules talk through ports in `packages/contracts`. Request-time database roles do not have `BYPASSRLS`.
+Node 22.13 or newer, pnpm, Turborepo, Vite, Fastify, PostgreSQL 18. Do not add Next.js, Redis, Prisma, or a headless browser. Money is integer rupiah in `bigint`. `packages/payroll-engine` does no database, network, or LLM work. `packages/payslip-pdf` does no database, network, storage, or Chromium work. Modules talk through ports in `packages/contracts`. Request-time database roles do not have `BYPASSRLS`.
