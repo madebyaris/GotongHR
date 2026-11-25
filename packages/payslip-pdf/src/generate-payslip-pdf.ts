@@ -11,6 +11,8 @@ import type {
 
 const MARGIN_X = 40;
 const MARGIN_Y = 36;
+const SECTION_LABEL_HEIGHT = 14;
+const BPJS_HEADER_HEIGHT = 16;
 const INK = "#1c1917";
 const MUTED = "#57534e";
 const RULE = "#d6d3d1";
@@ -157,7 +159,7 @@ function ensureSpace(
 function sectionLabel(doc: PDFKit.PDFDocument, y: number, label: string): number {
   doc.font("Helvetica-Bold").fontSize(8).fillColor(MUTED);
   doc.text(label, MARGIN_X, y, { width: contentWidth(doc), lineBreak: false });
-  return y + 14;
+  return y + SECTION_LABEL_HEIGHT;
 }
 
 function hairline(doc: PDFKit.PDFDocument, y: number): number {
@@ -279,7 +281,10 @@ function drawAmountSection(
   totalLabel: string,
   lines: readonly PayslipAmountLine[],
 ): number {
-  y = ensureSpace(doc, y, 32, payslip.tableUndeclared);
+  const first = lines[0];
+  const firstLabel = first === undefined ? "" : bilingual(first.labelId, first.labelEn);
+  const firstHeight = first === undefined ? 18 : amountRowHeight(doc, firstLabel, false);
+  y = ensureSpace(doc, y, SECTION_LABEL_HEIGHT + firstHeight, payslip.tableUndeclared);
   y = sectionLabel(doc, y, title);
   let total = 0n;
   for (const line of lines) {
@@ -297,11 +302,13 @@ function drawAmountSection(
 }
 
 function drawBpjs(doc: PDFKit.PDFDocument, payslip: PayslipDto, y: number): number {
-  y = ensureSpace(doc, y, 52, payslip.tableUndeclared);
+  doc.font("Helvetica").fontSize(8);
+  const lineHeight = doc.currentLineHeight();
+  const blockHeight = SECTION_LABEL_HEIGHT + lineHeight * 2 + 8 + BPJS_HEADER_HEIGHT;
+  y = ensureSpace(doc, y, blockHeight, payslip.tableUndeclared);
   y = sectionLabel(doc, y, "RINCIAN BPJS / BPJS BREAKDOWN");
   doc.font("Helvetica").fontSize(8).fillColor(MUTED);
   const noteWidth = contentWidth(doc);
-  const lineHeight = doc.currentLineHeight();
   doc.text("Kolom perusahaan tidak dipotong dari gaji bersih.", MARGIN_X, y, {
     width: noteWidth,
     lineBreak: false,
@@ -311,7 +318,7 @@ function drawBpjs(doc: PDFKit.PDFDocument, payslip: PayslipDto, y: number): numb
     lineBreak: false,
   });
   y += lineHeight * 2 + 8;
-  y = ensureSpace(doc, y, 16, payslip.tableUndeclared);
+  y = ensureSpace(doc, y, BPJS_HEADER_HEIGHT, payslip.tableUndeclared);
   y = bpjsRow(doc, y, "", "Karyawan / Employee", "Perusahaan / Employer", true);
   for (const row of BPJS_ROWS) {
     y = ensureSpace(doc, y, 16, payslip.tableUndeclared);

@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "gotonghr-web",
+  "main": "worker/index.ts",
+  // Assets ship from the edge. The Worker runs only for /api, so hashed files are not billed as invocations.
+  "compatibility_date": "2026-11-25",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "html_handling": "none",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api", "/api/*"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production"
+  }
+}

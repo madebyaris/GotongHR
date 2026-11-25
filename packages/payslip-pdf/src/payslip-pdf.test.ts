@@ -128,6 +128,40 @@ test("a long earning label wraps beside the amount instead of through it", async
   assert.ok(salary.y < lowestLabel - 2);
 });
 
+test("a heading stays with its first row when the page is nearly full", async () => {
+  const labelId =
+    "Tunjangan transportasi lintas kota untuk penugasan proyek yang berlangsung beberapa bulan";
+  const labelEn =
+    "Cross-city transport allowance for a project assignment that runs for several months";
+  const fullLabel = `${labelId} / ${labelEn}`;
+  for (let fillers = 0; fillers <= 36; fillers += 1) {
+    const payslip = samplePayslip({ tableUndeclared: false });
+    payslip.earnings = [
+      ...payslip.earnings,
+      ...Array.from({ length: fillers }, (_, index) => ({
+        labelId: `Tambahan ${index}`,
+        labelEn: `Extra ${index}`,
+        amountIdr: 1_000n,
+      })),
+    ];
+    payslip.deductions = [{ labelId, labelEn, amountIdr: 8_765_432n }, ...payslip.deductions];
+    const opened = await readPayslipText(await generatePayslipPdf(payslip, "17081995"), "17081995");
+    const heading = opened.runs.find((run) => run.str.includes("POTONGAN / DEDUCTIONS"));
+    const labelRuns = opened.runs.filter((run) => run.str.length > 8 && fullLabel.includes(run.str));
+    const bpjs = opened.runs.find((run) => run.str.includes("RINCIAN BPJS"));
+    const note = opened.runs.find((run) => run.str.includes("Kolom perusahaan"));
+    const bpjsHeader = opened.runs.find((run) => run.str.includes("Karyawan / Employee"));
+    assert.ok(heading, `deduction heading missing at ${fillers} fillers`);
+    assert.ok(labelRuns.length >= 2, `long deduction did not wrap at ${fillers} fillers`);
+    assert.ok(bpjs && note && bpjsHeader, `BPJS block missing at ${fillers} fillers`);
+    for (const run of labelRuns) {
+      assert.equal(run.page, heading.page, `deduction heading split at ${fillers} fillers`);
+    }
+    assert.equal(note.page, bpjs.page, `BPJS note split at ${fillers} fillers`);
+    assert.equal(bpjsHeader.page, bpjs.page, `BPJS header split at ${fillers} fillers`);
+  }
+});
+
 test("the BPJS notes sit on two separate lines", async () => {
   const opened = await readPayslipText(await generatePayslipPdf(samplePayslip(), "17081995"), "17081995");
   const indonesian = opened.runs.find((run) => run.str.includes("Kolom perusahaan"));

@@ -1,0 +1,76 @@
+# API-only overlay for docker/docker-compose.vps.yml.
+# Requires Docker Compose 2.24 or newer (!override and !reset).
+#
+# The static Caddy service moves to the vps-frontend profile and does not start.
+# cloudflared replaces it at a 48 MB cap. The 2 GB API and Postgres caps stay in the
+# base file. For 1 GB, pass docker/docker-compose.vps.1g.yml last so those caps win.
+#
+# Tunnel profile publishes no host ports. Postgres stays on 127.0.0.1:5432 from the
+# base file. The API port is removed so a local process cannot skip the proxy.
+#
+# Volume paths resolve from docker/, because docker/docker-compose.vps.yml is the
+# first -f file. ../infra/caddy is this repo's infra/caddy directory.
+
+services:
+  caddy:
+    profiles: !override
+      - vps-frontend
+    ports: !reset []
+
+  api:
+    ports: !reset []
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      # Reached only through cloudflared or origin-pull Caddy. The base file
+      # already requires BETTER_AUTH_URL and defaults GOTONG_TRUST_PROXY to 1.
+      GOTONG_TRUST_CLOUDFLARE: ${GOTONG_TRUST_CLOUDFLARE:-true}
+
+  postgres:
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudflared:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:2026.11.2@sha256:55c7e3e8d89d5e8d20b75a82f3602cbf98e06db406e73e282073cfdc5a9a3af6
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      TUNNEL_TRANSPORT_PROTOCOL: http2
+    mem_limit: 48m
+    memswap_limit: 48m
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy-api:
+    profiles: ["origin-pull"]
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    mem_limit: 48m
+    memswap_limit: 48m
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "443:443"
+    volumes:
+      - ../infra/caddy/Caddyfile.api-only:/etc/caddy/Caddyfile:ro
+      - ../infra/caddy/certs/cloudflare-zone-origin-pull-ca.pem:/etc/caddy/certs/cloudflare-zone-origin-pull-ca.pem:ro
+      - ${ORIGIN_CERT_PATH:-./origin.pem}:/etc/caddy/certs/origin.pem:ro
+      - ${ORIGIN_KEY_PATH:-./origin.key}:/etc/caddy/certs/origin.key:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
