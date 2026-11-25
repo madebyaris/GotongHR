@@ -4,6 +4,7 @@ export { AuditChainError } from "./errors.ts";
 export { hashChainEnabledFromEnv, verifyChain } from "./hash-chain.ts";
 export type { ChainVerification, StoredAuditEvent } from "./hash-chain.ts";
 export { provisionTenantKeys } from "./keys.ts";
+export { createSupportGrantAuditPort } from "./support-grant-audit.ts";
 export { migrateAudit } from "./migrate.ts";
 export type { AuditMigrateInput } from "./migrate.ts";
 export { auditedUpdate } from "./mutation.ts";

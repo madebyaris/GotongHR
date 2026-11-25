@@ -13,13 +13,16 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test --test-reporter spec src/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/env.test.ts src/migrate.test.ts src/policy.test.ts src/rls.integration.test.ts",
+    "pretest:isolation": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/identity build && pnpm --filter @gotonghr/audit build && pnpm --filter @gotonghr/platform build",
+    "test:isolation": "node --experimental-strip-types scripts/require-postgres.ts && node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/isolation.integration.test.ts ../modules/platform/src/isolation.integration.test.ts"
   },
   "dependencies": {
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1"
   },
   "devDependencies": {
+    "@gotonghr/crypto": "workspace:*",
     "@types/node": "22.20.6",
     "@types/pg": "8.23.1",
     "eslint": "10.15.0",

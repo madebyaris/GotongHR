@@ -1,4 +1,4 @@
-import { fail, ok } from "@gotonghr/contracts";
+import { fail, ok, type SupportGrantAuditPort } from "@gotonghr/contracts";
 import type { TenantDatabase } from "@gotonghr/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -59,6 +59,7 @@ export type TenantAdminResult =
 export interface PlatformDeps {
   platform: PlatformDatabase;
   app: TenantDatabase;
+  tenantAudit: SupportGrantAuditPort;
   mountPlatformRoutes: boolean;
   inviteSecret: string;
   hashOwnerPassword(password: string): Promise<string>;
@@ -141,7 +142,8 @@ const tenantListQuery = z.object({
 
 /**
  * Platform routes and tenant support-grant routes mount together.
- * `single_tenant` leaves both unmounted. Slice 1.3 adds the tenant audit copy.
+ * `single_tenant` leaves both unmounted.
+ * Grant actions append tenant `aud_events` through `tenantAudit`.
  */
 export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps): Promise<void> {
   if (!deps.mountPlatformRoutes) return;
@@ -154,7 +156,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const scope: GrantScope = body.scope ?? "read_only";
     const allowPiiReveal = body.allowPiiReveal ?? false;
     await run(reply, async () => {
-      const created = await createSupportGrant(deps.app, {
+      const created = await createSupportGrant(deps.app, deps.tenantAudit, {
         tenantId: admin.tenantId,
         grantedByUserId: admin.userId,
         granteePlatformUserId: body.granteePlatformUserId,
@@ -162,6 +164,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
         expiresAt: new Date(body.expiresAt),
         scope,
         allowPiiReveal,
+        ip: admin.ip,
       });
       return reply.code(201).send(ok(created));
     });
@@ -173,9 +176,11 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const params = await parseBody(reply, idParam, request.params);
     if (!params) return;
     await run(reply, async () => {
-      const revoked = await revokeSupportGrant(deps.app, {
+      const revoked = await revokeSupportGrant(deps.app, deps.tenantAudit, {
         tenantId: admin.tenantId,
         grantId: params.id,
+        actorUserId: admin.userId,
+        ip: admin.ip,
       });
       return reply.send(ok(revoked));
     });
@@ -334,7 +339,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const body = await parseBody(reply, activateBody, request.body);
     if (!body) return;
     await run(reply, async () => {
-      const activated = await activateSupportGrant(deps.platform, deps.app, {
+      const activated = await activateSupportGrant(deps.platform, deps.app, deps.tenantAudit, {
         token: body.token,
         actorId: actor.id,
         ip: actor.ip,
@@ -352,6 +357,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
       const opened = await withSupportSession(
         deps.platform,
         deps.app,
+        deps.tenantAudit,
         { sessionToken: body.sessionToken, actorId: actor.id, ip: actor.ip },
         async () => null,
       );
