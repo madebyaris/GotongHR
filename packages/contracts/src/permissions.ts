@@ -1,4 +1,6 @@
 export const permissionAtoms = [
+  "employee.read",
+  "employee.write",
   "employee.pii.read",
   "employee.pii.reveal",
   "attendance.approve",

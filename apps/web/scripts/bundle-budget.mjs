@@ -42,7 +42,10 @@ function walk(manifest, key, files, seen) {
 function shellBytes(manifest, routeHint) {
   const entry = Object.keys(manifest).find((key) => manifest[key]?.isEntry);
   if (!entry) throw new Error("Manifest has no entry.");
-  const routeKey = Object.keys(manifest).find((key) => key.includes(routeHint));
+  const keys = Object.keys(manifest);
+  const routeKey =
+    keys.find((key) => key.includes(`${routeHint}/index`)) ??
+    keys.find((key) => key.includes(routeHint));
   if (!routeKey) throw new Error(`Manifest has no ${routeHint} chunk.`);
   const files = new Set();
   walk(manifest, entry, files, new Set());

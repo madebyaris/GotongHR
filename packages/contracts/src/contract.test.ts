@@ -163,6 +163,8 @@ test("idr accepts only bigint rupiah", () => {
 
 test("permission atoms are the spec set", () => {
   assert.deepEqual(permissionAtoms, [
+    "employee.read",
+    "employee.write",
     "employee.pii.read",
     "employee.pii.reveal",
     "attendance.approve",
@@ -191,7 +193,14 @@ test("built-in roles keep finalize and PII off the employee", () => {
     "it_security_admin",
   ]);
   assert.equal(roleHasPermission("employee", "employee.pii.read"), false);
+  assert.equal(roleHasPermission("employee", "employee.read"), false);
+  assert.equal(roleHasPermission("employee", "employee.write"), false);
   assert.equal(roleHasPermission("branch_manager", "employee.pii.read"), false);
+  assert.equal(roleHasPermission("branch_manager", "employee.read"), false);
+  assert.equal(roleHasPermission("org_owner", "employee.write"), true);
+  assert.equal(roleHasPermission("hr_admin", "employee.write"), true);
+  assert.equal(roleHasPermission("payroll_admin", "employee.read"), true);
+  assert.equal(roleHasPermission("payroll_admin", "employee.write"), false);
   assert.equal(roleHasPermission("branch_manager", "attendance.approve"), true);
   assert.equal(roleHasPermission("org_owner", "payroll.run.finalize"), true);
   assert.equal(roleHasPermission("org_owner", "payroll.run.prepare"), false);
@@ -207,6 +216,8 @@ test("built-in roles keep finalize and PII off the employee", () => {
   assert.equal(isPrivilegedRole("employee"), false);
   assert.equal(isPrivilegedRole("branch_manager"), false);
   assert.equal(permissionRequiresPrivilegedTotp("employee.pii.read"), true);
+  assert.equal(permissionRequiresPrivilegedTotp("employee.read"), false);
+  assert.equal(permissionRequiresPrivilegedTotp("employee.write"), false);
   assert.equal(permissionRequiresPrivilegedTotp("payroll.run.finalize"), true);
   assert.equal(permissionRequiresPrivilegedTotp("attendance.approve"), false);
   assert.equal(permissionRequiresPrivilegedTotp("tenant.support_grant.write"), true);

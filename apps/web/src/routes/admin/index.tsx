@@ -11,7 +11,7 @@ import {
 } from "@gotonghr/contracts";
 import { formatIdr } from "@gotonghr/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError, apiData } from "@/lib/api";
@@ -223,6 +223,11 @@ function CompanySetup({ context }: { context: MeContext }) {
       <SetupHeader title="Set up the company" detail={`${context.tenant.name} · ${context.user.email}`} />
       <p className="mt-4 text-base" role="status">
         {status}
+      </p>
+      <p className="mt-2 text-base">
+        <Link className="font-medium underline" to="/admin/employees">
+          Employees
+        </Link>
       </p>
       {otherEntities.length > 0 ? (
         <p className="mt-2 text-sm text-muted-foreground">

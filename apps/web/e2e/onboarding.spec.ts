@@ -74,7 +74,7 @@ async function resetCompany(): Promise<void> {
   const client = new pg.Client({ connectionString });
   await client.connect();
   try {
-    await client.query("TRUNCATE TABLE id_branches, id_legal_entities");
+    await client.query("TRUNCATE TABLE id_branches, id_legal_entities CASCADE");
   } finally {
     await client.end();
   }

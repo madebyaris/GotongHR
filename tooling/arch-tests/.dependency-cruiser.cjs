@@ -5,14 +5,14 @@ module.exports = {
       name: "no-sibling-module-imports",
       severity: "error",
       comment:
-        "packages/modules/* cannot import a sibling module schema or internals.",
+        "Domain modules cannot import each other. @gotonghr/audit is the shared vault and may be imported.",
       from: {
         path: "^packages/modules/([^/]+)/",
         pathNot: "^packages/modules/platform/src/isolation(-schema|\\.integration\\.test)\\.ts$",
       },
       to: {
         path: "^packages/modules/",
-        pathNot: "^packages/modules/$1/",
+        pathNot: "^packages/modules/($1|audit)/",
       },
     },
     {

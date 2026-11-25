@@ -1,4 +1,5 @@
 import { migrateAudit } from "@gotonghr/audit";
+import { migrateCoreHr } from "@gotonghr/core-hr";
 import { migrate, migrateEnvFrom } from "@gotonghr/db";
 import { migrateIdentity } from "@gotonghr/identity";
 import { migratePlatform } from "./migrate.ts";
@@ -16,6 +17,7 @@ export async function applyTenantSchema(env: NodeJS.ProcessEnv = process.env): P
     migratorUrl: migrateEnv.migratorUrl,
   });
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
 }
 
 if (process.env.GOTONG_APPLY_TENANT_SCHEMA === "1") {

@@ -34,6 +34,8 @@ const nik = "3273011508950001";
 const nikMiddle = nik.slice(4, 12);
 const standIns = ["hr_secret", "att_secret", "pay_run"] as const;
 const deniedTables = [
+  "hr_employees",
+  "hr_employee_pii",
   "hr_secret",
   "att_secret",
   "pay_run",
