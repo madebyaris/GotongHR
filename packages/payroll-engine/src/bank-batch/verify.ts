@@ -47,8 +47,9 @@ function verifyBca(body: string): BankBatchVerification {
   if (lines[1] !== BCA_COLUMNS) return failed("The column header is not the BCA KlikBISNIS upload header.");
   return sumDetails(lines.slice(2), headerCount, headerTotal, (fields) => {
     if (fields.length !== 7) return "A BCA detail row does not have 7 columns.";
-    if (!isAccount(fields[0]) || !bcaRouteOk(fields[3], fields[4])) {
-      return "A BCA detail row pairs 014 with BCA, any other code with LLG, or uses RTGS or BIFAST.";
+    if (!isAccount(fields[0])) return "A BCA detail row account is not 8 to 18 digits.";
+    if (!bcaRouteOk(fields[3], fields[4])) {
+      return "A BCA detail row bank code does not match its transfer type.";
     }
     return readAmount(fields[2]);
   });
@@ -73,8 +74,9 @@ function verifyBni(body: string): BankBatchVerification {
     if (fields[0] !== String(detailCount + 1) || fields[1] !== debit || fields[4] !== "IDR") {
       return "A BNI detail row has the wrong number, debit account, or currency.";
     }
-    if (!isAccount(fields[2]) || !bniRouteOk(fields[8], fields[7])) {
-      return "A BNI detail row pairs 009 with INHOUSE, any other code with SKN, or uses RTGS or LLG.";
+    if (!isAccount(fields[2])) return "A BNI detail row account is not 8 to 18 digits.";
+    if (!bniRouteOk(fields[8], fields[7])) {
+      return "A BNI detail row bank code does not match its transfer type.";
     }
     return readAmount(fields[5]);
   });
