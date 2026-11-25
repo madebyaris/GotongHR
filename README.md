@@ -30,6 +30,8 @@ The 1 GB profile tightens the same stack:
 docker compose --env-file .env -f docker/docker-compose.vps.yml -f docker/docker-compose.vps.1g.yml up -d --build
 ```
 
+The Cloudflare profile serves the SPA from a Worker and runs only the API on the VPS. Commands, WAF rules, and the API `trustProxy` patch are in `infra/cloudflare/README.md`.
+
 `pnpm test` uses the published Postgres port. Start Postgres before the test:
 
 ```bash

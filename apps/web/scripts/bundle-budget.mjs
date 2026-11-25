@@ -96,3 +96,18 @@ console.log(`admin brotli ${admin} bytes (cap ${ADMIN_CAP})`);
 if (ess > ESS_CAP || admin > ADMIN_CAP) {
   process.exit(1);
 }
+
+const headersFile = path.join(dist, "_headers");
+if (!existsSync(headersFile)) {
+  console.error("dist/_headers is missing. Cloudflare asset headers will not deploy.");
+  process.exit(1);
+}
+const headersText = readFileSync(headersFile, "utf8");
+if (!headersText.includes("public, max-age=31536000, immutable")) {
+  console.error("dist/_headers does not set immutable caching on hashed assets.");
+  process.exit(1);
+}
+if (!headersText.includes("private, no-store")) {
+  console.error("dist/_headers does not keep /api and /auth uncached.");
+  process.exit(1);
+}

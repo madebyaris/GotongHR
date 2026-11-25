@@ -1,0 +1,60 @@
+{
+  "name": "GotongHR WAF custom rules",
+  "description": "Block probe paths and disallowed methods. Block the platform API unless Cloudflare Access credentials are present. Block scanners on auth paths without challenging Indonesian mobile or office networks.",
+  "kind": "zone",
+  "phase": "http_request_firewall_custom",
+  "rules": [
+    {
+      "description": "Block dotfiles, backups, and common probe paths. Leave /.well-known for ACME and app links.",
+      "expression": "( ( http.request.uri.path contains \"/.\" and not starts_with(http.request.uri.path, \"/.well-known/\") ) or http.request.uri.path contains \"../\" or ends_with(http.request.uri.path, \".bak\") or ends_with(http.request.uri.path, \".old\") or ends_with(http.request.uri.path, \".sql\") or ends_with(http.request.uri.path, \".zip\") or ends_with(http.request.uri.path, \".tar\") or ends_with(http.request.uri.path, \".tgz\") or ends_with(http.request.uri.path, \".swp\") or ends_with(http.request.uri.path, \".pem\") or ends_with(http.request.uri.path, \".key\") or ends_with(http.request.uri.path, \".ini\") or ends_with(http.request.uri.path, \".php\") or ends_with(http.request.uri.path, \".asp\") or ends_with(http.request.uri.path, \".aspx\") or lower(http.request.uri.path) contains \"/wp-admin\" or lower(http.request.uri.path) contains \"/wp-login\" or lower(http.request.uri.path) contains \"/phpmyadmin\" or lower(http.request.uri.path) contains \"/cgi-bin/\" or lower(http.request.uri.path) contains \"/server-status\" or lower(http.request.uri.path) contains \"/vendor/phpunit\" )",
+      "action": "block",
+      "enabled": true,
+      "action_parameters": {
+        "response": {
+          "status_code": 403,
+          "content": "Forbidden",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Block HTTP methods the API does not implement. OPTIONS stays allowed for same-origin and preflight requests.",
+      "expression": "(not http.request.method in {\"GET\" \"HEAD\" \"POST\" \"PUT\" \"PATCH\" \"DELETE\" \"OPTIONS\"})",
+      "action": "block",
+      "enabled": true,
+      "action_parameters": {
+        "response": {
+          "status_code": 403,
+          "content": "Forbidden",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Block /api/platform unless a Cloudflare Access JWT cookie, Access JWT header, or Access service token is present. Access still validates the credential. A spoofed header is not authentication.",
+      "expression": "( ( http.request.uri.path eq \"/api/platform\" or starts_with(http.request.uri.path, \"/api/platform/\") or http.request.uri.path eq \"/api/v1/platform\" or starts_with(http.request.uri.path, \"/api/v1/platform/\") ) and not http.cookie contains \"CF_Authorization=\" and not any(http.request.headers[\"cf-access-jwt-assertion\"][*] ne \"\") and not any(http.request.headers[\"cf-access-client-id\"][*] ne \"\") )",
+      "action": "block",
+      "enabled": true,
+      "action_parameters": {
+        "response": {
+          "status_code": 403,
+          "content": "Forbidden",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Block scanner user agents and traversal on /api/auth. Do not challenge by country, ASN, or bot score. Indonesian mobile CGNAT and office NAT must pass.",
+      "expression": "( ( starts_with(http.request.uri.path, \"/api/auth/\") or starts_with(http.request.uri.path, \"/api/v1/auth/\") ) and ( lower(http.user_agent) contains \"sqlmap\" or lower(http.user_agent) contains \"nikto\" or lower(http.user_agent) contains \"nmap\" or lower(http.user_agent) contains \"masscan\" or lower(http.user_agent) contains \"nuclei\" or lower(http.user_agent) contains \"dirbuster\" or lower(http.user_agent) contains \"gobuster\" or lower(http.user_agent) contains \"zgrab\" or http.request.uri.path contains \"../\" or http.request.uri.query contains \"../\" or http.request.uri.query contains \"<script\" ) )",
+      "action": "block",
+      "enabled": true,
+      "action_parameters": {
+        "response": {
+          "status_code": 403,
+          "content": "Forbidden",
+          "content_type": "text/plain"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "name": "GotongHR rate limits",
+  "description": "Per-IP edge limits for auth, clock-in, and AI. Thresholds fit a 30-person Indonesian office behind one NAT at 08:00 WIB. Counters use ip.src and cf.colo.id only, so a client cannot rotate a header to get a fresh counter.",
+  "kind": "zone",
+  "phase": "http_ratelimit",
+  "rules": [
+    {
+      "description": "Sign-in. 120 requests per minute per office IP covers 30 people with three attempts each, plus a few retries.",
+      "expression": "(starts_with(http.request.uri.path, \"/api/auth/sign-in\") or starts_with(http.request.uri.path, \"/api/v1/auth/sign-in\"))",
+      "action": "block",
+      "enabled": true,
+      "ratelimit": {
+        "characteristics": ["cf.colo.id", "ip.src"],
+        "period": 60,
+        "requests_per_period": 120,
+        "mitigation_timeout": 60
+      },
+      "action_parameters": {
+        "response": {
+          "status_code": 429,
+          "content": "Too many requests",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Two-factor. 90 requests per minute per office IP covers 30 people mistyping a TOTP code twice.",
+      "expression": "(starts_with(http.request.uri.path, \"/api/auth/two-factor\") or starts_with(http.request.uri.path, \"/api/v1/auth/two-factor\"))",
+      "action": "block",
+      "enabled": true,
+      "ratelimit": {
+        "characteristics": ["cf.colo.id", "ip.src"],
+        "period": 60,
+        "requests_per_period": 90,
+        "mitigation_timeout": 60
+      },
+      "action_parameters": {
+        "response": {
+          "status_code": 429,
+          "content": "Too many requests",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Password reset. 30 requests per minute per office IP lets the whole office request once, then cools down.",
+      "expression": "(starts_with(http.request.uri.path, \"/api/auth/forget-password\") or starts_with(http.request.uri.path, \"/api/v1/auth/forget-password\"))",
+      "action": "block",
+      "enabled": true,
+      "ratelimit": {
+        "characteristics": ["cf.colo.id", "ip.src"],
+        "period": 60,
+        "requests_per_period": 30,
+        "mitigation_timeout": 120
+      },
+      "action_parameters": {
+        "response": {
+          "status_code": 429,
+          "content": "Too many requests",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "Clock-in. 180 requests per minute per office IP covers 30 people at 08:00 WIB with status checks and retries. The full budget can arrive in the first seconds. mitigation_timeout is 10 seconds so a burst over the cap recovers before the next wave.",
+      "expression": "(starts_with(http.request.uri.path, \"/api/attendance/clock\") or starts_with(http.request.uri.path, \"/api/v1/attendance/clock\") or starts_with(http.request.uri.path, \"/api/v1/mobile/clock\"))",
+      "action": "block",
+      "enabled": true,
+      "ratelimit": {
+        "characteristics": ["cf.colo.id", "ip.src"],
+        "period": 60,
+        "requests_per_period": 180,
+        "mitigation_timeout": 10
+      },
+      "action_parameters": {
+        "response": {
+          "status_code": 429,
+          "content": "Too many requests",
+          "content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "description": "AI. 60 requests per minute per office IP. This is not the morning clock-in burst.",
+      "expression": "(http.request.uri.path eq \"/api/ai\" or starts_with(http.request.uri.path, \"/api/ai/\") or http.request.uri.path eq \"/api/v1/ai\" or starts_with(http.request.uri.path, \"/api/v1/ai/\"))",
+      "action": "block",
+      "enabled": true,
+      "ratelimit": {
+        "characteristics": ["cf.colo.id", "ip.src"],
+        "period": 60,
+        "requests_per_period": 60,
+        "mitigation_timeout": 30
+      },
+      "action_parameters": {
+        "response": {
+          "status_code": 429,
+          "content": "Too many requests",
+          "content_type": "text/plain"
+        }
+      }
+    }
+  ]
+}

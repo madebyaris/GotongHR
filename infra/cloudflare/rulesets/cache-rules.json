@@ -1,0 +1,43 @@
+{
+  "name": "GotongHR cache rules",
+  "description": "Bypass cache for /api, /auth, and HTML requests that carry a Better Auth session cookie. Cache /assets for one year. Rules are first match, so the asset rule is before the cookie bypass.",
+  "kind": "zone",
+  "phase": "http_request_cache_settings",
+  "rules": [
+    {
+      "description": "Never cache API or auth responses.",
+      "expression": "(http.request.uri.path eq \"/api\" or starts_with(http.request.uri.path, \"/api/\") or http.request.uri.path eq \"/auth\" or starts_with(http.request.uri.path, \"/auth/\"))",
+      "action": "set_cache_settings",
+      "enabled": true,
+      "action_parameters": {
+        "cache": false
+      }
+    },
+    {
+      "description": "Edge-cache content-hashed Vite assets for one year. Session cookies do not bypass this rule.",
+      "expression": "(starts_with(http.request.uri.path, \"/assets/\"))",
+      "action": "set_cache_settings",
+      "enabled": true,
+      "action_parameters": {
+        "cache": true,
+        "edge_ttl": {
+          "mode": "override_origin",
+          "default": 31536000
+        },
+        "browser_ttl": {
+          "mode": "override_origin",
+          "default": 31536000
+        }
+      }
+    },
+    {
+      "description": "Bypass cache for other paths when a Better Auth session cookie is present. Hashed assets are excluded.",
+      "expression": "(not starts_with(http.request.uri.path, \"/assets/\") and http.cookie contains \"better-auth.session_token\")",
+      "action": "set_cache_settings",
+      "enabled": true,
+      "action_parameters": {
+        "cache": false
+      }
+    }
+  ]
+}

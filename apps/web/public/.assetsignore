@@ -1,0 +1,3 @@
+# Caddy on the VPS serves these sidecars. Cloudflare Brotli compresses the canonical files.
+**/*.br
+**/*.gz
