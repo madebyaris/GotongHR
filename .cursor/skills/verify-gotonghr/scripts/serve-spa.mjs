@@ -62,7 +62,12 @@ function proxy(request, response, pathname, search) {
 }
 
 function serveFile(pathname, response) {
-  const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/u, "");
+  if (pathname === "/_headers" || pathname === "/_redirects" || pathname === "/.assetsignore") {
+    response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+    response.end("not found");
+    return;
+  }
+  const relative = spaPath(pathname);
   const file = path.resolve(root, relative);
   if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
     response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
@@ -71,7 +76,13 @@ function serveFile(pathname, response) {
   }
   access(file)
     .then(() => send(file, response))
-    .catch(() => send(path.join(root, "index.html"), response));
+    .catch(() => send(path.join(root, pathname.startsWith("/ess") ? "ess/index.html" : "index.html"), response));
+}
+
+function spaPath(pathname) {
+  if (pathname === "/") return "index.html";
+  if (pathname === "/ess" || pathname === "/ess/") return "ess/index.html";
+  return pathname.replace(/^\/+/u, "");
 }
 
 function send(file, response) {

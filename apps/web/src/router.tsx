@@ -14,7 +14,6 @@ const SignInPage = lazy(() => import("./routes/sign-in"));
 const AdminPage = lazy(() => import("./routes/admin/index"));
 const EmployeesPage = lazy(() => import("./routes/admin/employees"));
 const AssistantPage = lazy(() => import("./routes/admin/assistant"));
-const EssPage = lazy(() => import("./routes/ess/index"));
 
 function Root() {
   return (
@@ -58,20 +57,7 @@ const assistantRoute = createRoute({
   component: AssistantPage,
 });
 
-const essRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/ess",
-  component: EssPage,
-});
-
-const children: AnyRoute[] = [
-  indexRoute,
-  signInRoute,
-  adminRoute,
-  employeesRoute,
-  assistantRoute,
-  essRoute,
-];
+const children: AnyRoute[] = [indexRoute, signInRoute, adminRoute, employeesRoute, assistantRoute];
 
 if (
   import.meta.env.VITE_DEPLOYMENT_MODE === "multi_tenant_saas" ||

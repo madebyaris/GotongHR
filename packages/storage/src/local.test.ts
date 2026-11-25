@@ -235,6 +235,31 @@ describe("local object storage", () => {
     assert.equal(health.statusCode, 403);
     await app.close();
   });
+
+  it("accepts a presigned put on the /api prefix", async () => {
+    const storage = createLocalStorage({
+      rootDir: root,
+      secret: "test-secret",
+      urlPrefix: "/api",
+    });
+    const app = Fastify({ logger: false });
+    await storage.registerRoutes(app);
+    const signed = await storage.presignPut({
+      key: "tenant/api.txt",
+      contentType: "text/plain",
+      maxBytes: 32,
+    });
+    assert.equal(signed.url.startsWith("/api/storage/local/objects?"), true);
+    const put = await app.inject({
+      method: "PUT",
+      url: signed.url,
+      headers: { "content-type": "text/plain" },
+      payload: Buffer.from("api"),
+    });
+    assert.equal(put.statusCode, 200, put.body);
+    assert.equal(await readFile(path.join(root, "tenant/api.txt"), "utf8"), "api");
+    await app.close();
+  });
 });
 
 function signedToken(payload: unknown, secret: string): string {

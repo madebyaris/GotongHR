@@ -8,7 +8,7 @@ description: >
 
 # Verify GotongHR
 
-The surface is the Vite admin SPA and the Fastify API under `/api`. The owner sets up the company and adds an employee. `/ess` and `/admin/assistant` are not in this map yet.
+The surface is the Vite admin SPA, the ESS clock at `/ess`, and the Fastify API under `/api`. The owner sets up the company and adds an employee. An employee clocks in from the phone shell. `/admin/assistant` is not in this map yet.
 
 One run owns one compose project, `gotonghr-verify-$RUN_ID`, and one fresh database. Do not drive a compose project this run did not start. Do not point Playwright at port 80, 3000, or 5432 until doctor has checked the container label.
 

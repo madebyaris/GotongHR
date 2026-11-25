@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/ui build && vite build && node scripts/bundle-budget.mjs",
+    "build": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/ui build && vite build && node scripts/build-ess-sw.mjs && node scripts/bundle-budget.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint": "eslint .",
-    "test": "node --test scripts/bundle-budget.test.mjs && node --experimental-strip-types --test --test-reporter spec worker/*.test.ts",
+    "test": "node --test scripts/bundle-budget.test.mjs && node --experimental-strip-types --test --test-reporter spec scripts/ess-policy.test.ts worker/*.test.ts",
     "preview": "vite preview",
     "deploy": "pnpm typecheck && pnpm test && pnpm build && wrangler deploy"
   },
@@ -41,6 +41,11 @@
     "typescript": "5.9.3",
     "vite": "8.3.8",
     "vite-plugin-compression2": "2.5.4",
+    "workbox-build": "7.4.1",
+    "workbox-expiration": "7.4.1",
+    "workbox-precaching": "7.4.1",
+    "workbox-routing": "7.4.1",
+    "workbox-strategies": "7.4.1",
     "wrangler": "4.168.0"
   }
 }

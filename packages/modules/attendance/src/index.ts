@@ -24,3 +24,7 @@ export {
   registerClockRoutes,
 } from "./clock/index.ts";
 export type { ClockCaller, ClockMigrateInput, ClockRouteDeps } from "./clock/index.ts";
+export { migrateMobile } from "./mobile/migrate.ts";
+export type { MobileMigrateInput } from "./mobile/migrate.ts";
+export { registerMobileRoutes } from "./mobile/routes.ts";
+export type { MobileRouteDeps } from "./mobile/routes.ts";

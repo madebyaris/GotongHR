@@ -11,7 +11,7 @@ export default function HomePage() {
       <nav>
         <Link to="/sign-in">Sign in</Link>
         <Link to="/admin">Admin</Link>
-        <Link to="/ess">ESS</Link>
+        <a href="/ess">ESS</a>
       </nav>
     </main>
   );
