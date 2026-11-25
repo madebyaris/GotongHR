@@ -12,6 +12,7 @@ const tenantId = "11111111-1111-7111-8111-111111111111";
 
 function event(overrides: Partial<StoredAuditEvent> & Pick<StoredAuditEvent, "id" | "createdAt" | "diff">): StoredAuditEvent {
   const prevHash = overrides.prevHash === undefined ? genesisHash(tenantId) : overrides.prevHash;
+  const chainSeq = overrides.chainSeq === undefined ? 1 : overrides.chainSeq;
   const fields = {
     id: overrides.id,
     tenantId,
@@ -27,10 +28,12 @@ function event(overrides: Partial<StoredAuditEvent> & Pick<StoredAuditEvent, "id
     userAgent: overrides.userAgent ?? null,
     createdAt: overrides.createdAt,
     prevHash: prevHash ?? genesisHash(tenantId),
+    chainSeq: chainSeq ?? 1,
   };
   return {
     ...fields,
     prevHash,
+    chainSeq,
     eventHash: overrides.eventHash === undefined ? eventHash(fields) : overrides.eventHash,
   };
 }
@@ -52,6 +55,7 @@ test("the hash chain links two events and rejects a tampered diff", () => {
     id: "cccccccc-cccc-7ccc-8ccc-cccccccccccc",
     createdAt: "2026-11-25T01:00:01.000Z",
     prevHash: first.eventHash,
+    chainSeq: 2,
     diff: { before: { label: "b" }, after: { label: "c" } },
   });
   assert.equal(first.eventHash?.length, 64);
@@ -63,6 +67,17 @@ test("the hash chain links two events and rejects a tampered diff", () => {
     diff: { before: { label: "tampered" }, after: { label: "b" } },
   };
   const result = verifyChain(tenantId, [tampered, second]);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.eventId, first.id);
+});
+
+test("a chain bound to one tenant does not verify for another tenant", () => {
+  const first = event({
+    id: "ffffffff-ffff-7fff-8fff-ffffffffffff",
+    createdAt: "2026-11-25T01:00:00.000Z",
+    diff: { before: { label: "a" }, after: { label: "b" } },
+  });
+  const result = verifyChain("22222222-2222-7222-8222-222222222222", [first]);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.eventId, first.id);
 });
@@ -83,6 +98,7 @@ test("key order does not change the event hash", () => {
     userAgent: null,
     createdAt: "2026-11-25T01:00:00.000Z",
     prevHash: genesisHash(tenantId),
+    chainSeq: 1,
   });
   const right = eventHash({
     id: "dddddddd-dddd-7ddd-8ddd-dddddddddddd",
@@ -99,6 +115,7 @@ test("key order does not change the event hash", () => {
     userAgent: null,
     createdAt: "2026-11-25T01:00:00.000Z",
     prevHash: genesisHash(tenantId),
+    chainSeq: 1,
   });
   assert.equal(left, right);
 });
@@ -110,6 +127,7 @@ test("a chain with null hashes is not a broken chain", () => {
     diff: { before: null, after: { label: "a" } },
     prevHash: null,
     eventHash: null,
+    chainSeq: null,
   });
   assert.deepEqual(verifyChain(tenantId, [row]), { ok: true, chained: false, events: 1 });
 });

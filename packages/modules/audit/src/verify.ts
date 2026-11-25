@@ -19,6 +19,7 @@ interface EventRow {
   user_agent: string | null;
   prev_hash: string | null;
   event_hash: string | null;
+  chain_seq: number | string | null;
   created_at: string;
 }
 
@@ -44,10 +45,11 @@ export async function verifyTenantHashChain(
         user_agent,
         prev_hash,
         event_hash,
-        to_char(created_at AT TIME ZONE 'UTC', ${AUDIT_TIMESTAMP_FORMAT}) AS created_at
+        chain_seq,
+        to_char(aud_events.created_at AT TIME ZONE 'UTC', ${AUDIT_TIMESTAMP_FORMAT}) AS created_at
       FROM aud_events
-      WHERE tenant_id = ${tenant}::uuid
-      ORDER BY created_at ASC, id ASC
+      WHERE aud_events.tenant_id = ${tenant}::uuid
+      ORDER BY aud_events.chain_seq ASC NULLS LAST, aud_events.created_at ASC, aud_events.id ASC
     `),
   );
   const events: StoredAuditEvent[] = rows.map((row) => ({
@@ -66,6 +68,7 @@ export async function verifyTenantHashChain(
     createdAt: row.created_at,
     prevHash: row.prev_hash,
     eventHash: row.event_hash,
+    chainSeq: row.chain_seq === null ? null : Number(row.chain_seq),
   }));
   return verifyChain(tenant, events);
 }

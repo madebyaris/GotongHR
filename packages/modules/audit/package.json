@@ -17,11 +17,10 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build",
+    "pretest": "pnpm --filter @gotonghr/crypto build && pnpm --filter @gotonghr/db build",
     "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/*.test.ts"
   },
   "dependencies": {
-    "@gotonghr/contracts": "workspace:*",
     "@gotonghr/crypto": "workspace:*",
     "@gotonghr/db": "workspace:*",
     "drizzle-orm": "0.45.4",

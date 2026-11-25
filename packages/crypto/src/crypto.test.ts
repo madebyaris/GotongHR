@@ -44,6 +44,9 @@ test("ciphertext is not the plaintext and a fresh IV changes the envelope", () =
   assert.equal(first.includes(nik), false);
   assert.notEqual(first, second);
   assert.equal(decryptField(dek, tenantA, "nik", first), nik);
+  assert.equal(decryptField(dek, tenantA.toUpperCase(), "nik", first), nik);
+  const fromUpper = encryptField(dek, tenantA.toUpperCase(), "nik", nik);
+  assert.equal(decryptField(dek, tenantA, "nik", fromUpper), nik);
   const packed = Buffer.from(first, "base64url");
   assert.equal(packed[0], 1);
   assert.equal(packed.length > 29, true);
@@ -76,6 +79,14 @@ test("tampered ciphertext or a different AAD fails authentication", () => {
   assert.throws(
     () => decryptField(dek, tenantA, "nik", version.toString("base64url")),
     /unsupported envelope version/,
+  );
+  assert.throws(
+    () => decryptField(dek, tenantA, "nik", `${envelope}=`),
+    (error: unknown) => error instanceof PiiCryptoError && /authentication/.test(error.message),
+  );
+  assert.throws(
+    () => decryptField(dek, tenantA, "nik", ` ${envelope}`),
+    (error: unknown) => error instanceof PiiCryptoError,
   );
 });
 
@@ -110,4 +121,14 @@ test("a wrapped DEK and pepper round-trip only with the matching AAD", () => {
     () => unwrapPepper(kek, wrappedPepper, randomUUID()),
     (error: unknown) => error instanceof PiiCryptoError,
   );
+  const otherKek = Buffer.alloc(32, 0x11);
+  assert.throws(
+    () => unwrapDek(otherKek, wrappedDek, tenantA),
+    (error: unknown) => error instanceof PiiCryptoError,
+  );
+  assert.throws(
+    () => unwrapPepper(otherKek, wrappedPepper, tenantA),
+    (error: unknown) => error instanceof PiiCryptoError,
+  );
+  assert.deepEqual(unwrapDek(kek, wrappedDek, tenantA.toUpperCase()), dek);
 });

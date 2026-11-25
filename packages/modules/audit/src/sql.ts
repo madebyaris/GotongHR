@@ -1,7 +1,7 @@
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/u;
 
 export function assertIdentifier(value: string): void {
-  if (!IDENTIFIER.test(value)) {
+  if (!IDENTIFIER.test(value) || Buffer.byteLength(value, "utf8") > 63) {
     throw new Error(`invalid identifier: ${value}`);
   }
 }

@@ -15,24 +15,25 @@ function assertKey(key: Buffer): void {
   }
 }
 
-function assertTenantId(tenantId: string): void {
+function tenantIdForAad(tenantId: string): string {
   if (!UUID.test(tenantId)) {
     throw new Error("tenant id must be a uuid");
   }
+  return tenantId.toLowerCase();
 }
 
 /** Binds ciphertext to one tenant and one PII field. */
 export function fieldAad(tenantId: string, field: PiiField): Buffer {
-  assertTenantId(tenantId);
+  const tenant = tenantIdForAad(tenantId);
   if (!isPiiField(field)) {
     throw new Error("unknown pii field");
   }
-  return Buffer.from(`pii\n${tenantId}\n${field}`, "utf8");
+  return Buffer.from(`pii\n${tenant}\n${field}`, "utf8");
 }
 
 export function keyAad(kind: "dek" | "pepper", tenantId: string): Buffer {
-  assertTenantId(tenantId);
-  return Buffer.from(`${kind}\n${tenantId}`, "utf8");
+  const tenant = tenantIdForAad(tenantId);
+  return Buffer.from(`${kind}\n${tenant}`, "utf8");
 }
 
 /**
@@ -52,7 +53,7 @@ export function seal(key: Buffer, plaintext: Buffer, aad: Buffer): string {
 export function open(key: Buffer, envelope: string, aad: Buffer): Buffer {
   assertKey(key);
   const packed = Buffer.from(envelope, "base64url");
-  if (packed.length < HEADER_BYTES) {
+  if (packed.toString("base64url") !== envelope || packed.length < HEADER_BYTES) {
     throw new PiiCryptoError("ciphertext failed authentication");
   }
   const version = packed[0];

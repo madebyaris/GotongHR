@@ -188,9 +188,6 @@ importers:
 
   packages/modules/audit:
     dependencies:
-      '@gotonghr/contracts':
-        specifier: workspace:*
-        version: link:../../contracts
       '@gotonghr/crypto':
         specifier: workspace:*
         version: link:../../crypto

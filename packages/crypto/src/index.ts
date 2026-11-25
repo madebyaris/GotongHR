@@ -5,5 +5,13 @@ export { isPiiField, piiFields } from "./fields.ts";
 export type { PiiField } from "./fields.ts";
 export { decodeKek, loadKek } from "./kek.ts";
 export { generateKey, unwrapDek, unwrapPepper, wrapDek, wrapPepper } from "./keys.ts";
-export { maskBankAccount, maskNik, maskNpwp } from "./mask.ts";
+export {
+  maskBankAccount,
+  maskBpjsKesehatan,
+  maskBpjsTk,
+  maskKkNumber,
+  maskNik,
+  maskNpwp,
+  maskPii,
+} from "./mask.ts";
 export { encryptField } from "./pii.ts";

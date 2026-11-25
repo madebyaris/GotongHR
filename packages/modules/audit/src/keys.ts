@@ -73,7 +73,6 @@ export async function readTenantSecrets(
 export async function hashChainEnabledForTenant(
   tx: TenantTx,
   tenantId: string,
-  env: NodeJS.ProcessEnv,
 ): Promise<boolean> {
   const rows = queryRows<{ hash_chain_enabled: boolean }>(
     await tx.execute(sql`
@@ -83,7 +82,7 @@ export async function hashChainEnabledForTenant(
     `),
   );
   const row = rows[0];
-  if (!row) return hashChainEnabledFromEnv(env);
+  if (!row) throw new Error("Tenant keys are not provisioned.");
   return asBoolean(row.hash_chain_enabled);
 }
 

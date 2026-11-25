@@ -31,6 +31,7 @@ export interface ChainFields {
   userAgent: string | null;
   createdAt: string;
   prevHash: string;
+  chainSeq: number;
 }
 
 export function canonicalJson(value: unknown): string {
@@ -59,6 +60,7 @@ export function eventHash(fields: ChainFields): string {
     actor_role: fields.actorRole,
     actor_user_id: fields.actorUserId,
     ai_proposal_id: fields.aiProposalId,
+    chain_seq: fields.chainSeq,
     created_at: fields.createdAt,
     diff: fields.diff,
     id: fields.id,
@@ -89,6 +91,7 @@ export interface StoredAuditEvent {
   createdAt: string;
   prevHash: string | null;
   eventHash: string | null;
+  chainSeq: number | null;
 }
 
 export type ChainVerification =
@@ -107,7 +110,7 @@ export function verifyChain(tenantId: string, events: readonly StoredAuditEvent[
 
   let previous = genesisHash(tenantId);
   for (const event of events) {
-    if (event.prevHash !== previous || event.eventHash === null) {
+    if (event.prevHash !== previous || event.eventHash === null || event.chainSeq === null) {
       return { ok: false, eventId: event.id };
     }
     const expected = eventHash({
@@ -125,6 +128,7 @@ export function verifyChain(tenantId: string, events: readonly StoredAuditEvent[
       userAgent: event.userAgent,
       createdAt: event.createdAt,
       prevHash: previous,
+      chainSeq: event.chainSeq,
     });
     if (event.eventHash !== expected) return { ok: false, eventId: event.id };
     previous = event.eventHash;

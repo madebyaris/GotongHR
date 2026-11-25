@@ -19,7 +19,7 @@ import {
 import { sql } from "drizzle-orm";
 import pg from "pg";
 import { PgBoss } from "pg-boss";
-import { dispatchOutboxOnce, OUTBOX_QUEUE } from "./dispatcher.ts";
+import { dispatchOutboxOnce, OUTBOX_QUEUE, outboxJobOptions } from "./dispatcher.ts";
 import { PiiRevealDeniedError, PiiRevealReasonError } from "./errors.ts";
 import { provisionTenantKeys, readTenantSecrets } from "./keys.ts";
 import { migrateAudit } from "./migrate.ts";
@@ -89,6 +89,7 @@ async function provisionBoss(migratorUrl: string): Promise<void> {
 describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
   let app: TenantDatabase;
   let platform: pg.Client;
+  let queue: pg.Client;
   let superuser: pg.Client;
   const migratorUrl = requiredEnv(process.env, "DATABASE_URL_MIGRATOR");
 
@@ -116,15 +117,24 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
     }
     app = createTenantDatabase(requiredEnv(process.env, "DATABASE_URL_APP"));
     platform = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_PLATFORM") });
+    queue = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_QUEUE") });
     superuser = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
     await platform.connect();
+    await queue.connect();
     await superuser.connect();
   });
 
   after(async () => {
     await superuser.query("DROP TABLE IF EXISTS aud_mutation_fixture");
+    await superuser.query("DELETE FROM aud_events");
+    await superuser.query("DELETE FROM aud_pii_access_logs");
+    await superuser.query("DELETE FROM aud_outbox_events");
+    await superuser.query("DELETE FROM aud_tenant_keys");
+    await superuser.query("DELETE FROM rls_probe");
+    await superuser.query("DELETE FROM pgboss.job WHERE name = $1", [OUTBOX_QUEUE]);
     await app.end();
     await platform.end();
+    await queue.end();
     await superuser.end();
   });
 
@@ -160,8 +170,13 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
           'seed'
         )
       `);
+      await tx.execute(sql`
+        INSERT INTO aud_tenant_keys (tenant_id, wrapped_dek, wrapped_pepper, hash_chain_enabled)
+        VALUES (${tenant}::uuid, 'wrapped-dek', 'wrapped-pepper', true)
+      `);
       assert.equal(await countOf(tx, "aud_events"), 1);
       assert.equal(await countOf(tx, "aud_pii_access_logs"), 1);
+      assert.equal(await countOf(tx, "aud_tenant_keys"), 1);
     });
 
     for (const statement of [
@@ -171,6 +186,9 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
       "UPDATE aud_pii_access_logs SET reason = reason",
       "DELETE FROM aud_pii_access_logs",
       "TRUNCATE aud_pii_access_logs",
+      "UPDATE aud_tenant_keys SET hash_chain_enabled = hash_chain_enabled",
+      "DELETE FROM aud_tenant_keys",
+      "TRUNCATE aud_tenant_keys",
     ]) {
       await assert.rejects(app.pool.query(statement), permissionDenied, statement);
       await assert.rejects(platform.query(statement), permissionDenied, statement);
@@ -202,10 +220,14 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
         actorUserId: actor,
         actorRole: "hr_admin",
         assignments: { label: "middle", nik: "3273011508950002" },
-      }, TEST_KEK);
+      });
       firstId = first.eventId;
       assert.equal(first.before.label, "before");
       assert.equal(first.after.label, "middle");
+      assert.equal(first.before.nik, "[redacted]");
+      assert.equal(first.after.nik, "[redacted]");
+      assert.equal(JSON.stringify(first).includes(nik), false);
+      assert.equal(JSON.stringify(first).includes("3273011508950002"), false);
       const second = await auditedUpdate(tx, {
         table: "aud_mutation_fixture",
         tenantId: tenant,
@@ -214,7 +236,7 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
         resourceType: "aud_mutation_fixture",
         actorUserId: actor,
         assignments: { label: "after" },
-      }, TEST_KEK);
+      });
       secondId = second.eventId;
       const verified = await verifyTenantHashChain(tx, tenant);
       assert.deepEqual(verified, { ok: true, chained: true, events: 2 });
@@ -222,17 +244,20 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
         id: string;
         prev_hash: string;
         event_hash: string;
+        chain_seq: number | string;
         diff_redacted_json: { before: { nik?: string; label?: string }; after: { nik?: string; label?: string } };
       }>(
         await tx.execute(sql`
-          SELECT id::text AS id, prev_hash, event_hash, diff_redacted_json
+          SELECT id::text AS id, prev_hash, event_hash, chain_seq, diff_redacted_json
           FROM aud_events
-          WHERE tenant_id = ${tenant}::uuid
-          ORDER BY created_at, id
+          WHERE aud_events.tenant_id = ${tenant}::uuid
+          ORDER BY aud_events.chain_seq
         `),
       );
       assert.equal(stored[0]?.id, firstId);
       assert.equal(stored[1]?.id, secondId);
+      assert.equal(Number(stored[0]?.chain_seq), 1);
+      assert.equal(Number(stored[1]?.chain_seq), 2);
       assert.equal(stored[1]?.prev_hash, stored[0]?.event_hash);
       assert.equal(stored[0]?.diff_redacted_json.before.nik, "[redacted]");
       assert.equal(stored[0]?.diff_redacted_json.after.nik, "[redacted]");
@@ -280,7 +305,7 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
         resourceType: "aud_mutation_fixture",
         actorUserId: actor,
         assignments: { label: "still" },
-      }, off);
+      });
       const rows = queryRows<{ prev_hash: string | null; event_hash: string | null }>(
         await tx.execute(sql`
           SELECT prev_hash, event_hash FROM aud_events WHERE tenant_id = ${tenant}::uuid
@@ -291,6 +316,60 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
       assert.equal(rows[0]?.event_hash, null);
       assert.deepEqual(await verifyTenantHashChain(tx, tenant), { ok: true, chained: false, events: 1 });
     });
+  });
+
+  it("refuses an audit write before tenant keys exist", async () => {
+    const tenant = randomUUID();
+    const actor = randomUUID();
+    await app.withTenantContext(tenant, async (tx) => {
+      const inserted = queryRows<{ id: string }>(
+        await tx.execute(sql`
+          INSERT INTO aud_mutation_fixture (tenant_id, label, nik)
+          VALUES (${tenant}::uuid, 'early', '3273011508950001')
+          RETURNING id::text AS id
+        `),
+      );
+      const resourceId = inserted[0]?.id;
+      assert.ok(resourceId);
+      await assert.rejects(
+        () =>
+          auditedUpdate(tx, {
+            table: "aud_mutation_fixture",
+            tenantId: tenant,
+            resourceId,
+            action: "update",
+            resourceType: "aud_mutation_fixture",
+            actorUserId: actor,
+            assignments: { label: "later" },
+          }),
+        /not provisioned/,
+      );
+      assert.equal(await countOf(tx, "aud_events"), 0);
+    });
+  });
+
+  it("lets the queue role update only the publish columns", async () => {
+    const tenant = randomUUID();
+    const queued = await app.withTenantContext(tenant, async (tx) => {
+      return enqueueOutboxEvent(tx, {
+        tenantId: tenant,
+        topic: "audit.test.ping",
+        payload: { n: 1 },
+      });
+    });
+    for (const statement of [
+      "UPDATE aud_outbox_events SET topic = topic WHERE id = $1",
+      "UPDATE aud_outbox_events SET payload = payload WHERE id = $1",
+      "UPDATE aud_outbox_events SET tenant_id = tenant_id WHERE id = $1",
+    ]) {
+      await assert.rejects(queue.query(statement, [queued.id]), permissionDenied, statement);
+    }
+    const updated = await queue.query(
+      "UPDATE aud_outbox_events SET attempts = attempts WHERE id = $1",
+      [queued.id],
+    );
+    assert.equal(updated.rowCount, 1);
+    await superuser.query("DELETE FROM aud_outbox_events WHERE id = $1", [queued.id]);
   });
 
   it("uses one pepper per tenant for nik_hash and reveals only with permission", async () => {
@@ -432,6 +511,12 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
     });
     await boss.start();
     try {
+      const primed = await boss.send(
+        OUTBOX_QUEUE,
+        { outboxId: queued.id, tenantId: tenant, topic: "audit.test.ping", payload: { n: 2, nik: "[redacted]" } },
+        outboxJobOptions(queued.id),
+      );
+      assert.equal(typeof primed, "string");
       const first = await dispatchOutboxOnce(boss, queueUrl);
       assert.equal(first.failed, 0);
       assert.equal(first.published, 1);

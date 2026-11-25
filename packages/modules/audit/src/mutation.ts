@@ -47,12 +47,12 @@ interface HashRow {
 /**
  * Updates one tenant row and appends `aud_events` in the same transaction.
  * PostgreSQL 18 returns OLD and NEW from that UPDATE. PII keys are redacted
- * before the JSON is stored. The hash chain runs when the tenant flag is on.
+ * before the JSON is stored. The returned snapshots are redacted too.
+ * The hash chain runs when the tenant key row says it is on.
  */
 export async function auditedUpdate(
   tx: TenantTx,
   input: AuditedUpdateInput,
-  env: NodeJS.ProcessEnv = process.env,
 ): Promise<AuditedUpdateResult> {
   const tenantId = await assertSameTenant(tx, input.tenantId);
   const resourceId = assertUuid(input.resourceId, "resource id");
@@ -97,17 +97,15 @@ export async function auditedUpdate(
   }
   const row = updated[0];
   if (!row) throw new Error("audit target was not found");
-  const before = asRecord(row.before_json);
-  const after = asRecord(row.after_json);
-  const diff = {
-    before: redactPii(before),
-    after: redactPii(after),
-  };
+  const before = asRecord(redactPii(asRecord(row.before_json)));
+  const after = asRecord(redactPii(asRecord(row.after_json)));
+  const diff = { before, after };
 
-  const chain = await hashChainEnabledForTenant(tx, tenantId, env);
+  const chain = await hashChainEnabledForTenant(tx, tenantId);
   let prevHash: string | null = null;
   let eventHashValue: string | null = null;
   const stamp = await nextStamp(tx);
+  const chainSeq = await nextChainSeq(tx, tenantId);
   if (chain) {
     prevHash = await previousHash(tx, tenantId);
     eventHashValue = eventHash({
@@ -125,6 +123,7 @@ export async function auditedUpdate(
       userAgent,
       createdAt: stamp.created_at,
       prevHash,
+      chainSeq,
     });
   }
 
@@ -132,7 +131,7 @@ export async function auditedUpdate(
     INSERT INTO aud_events (
       id, tenant_id, actor_user_id, actor_role, action, resource_type, resource_id,
       diff_redacted_json, ai_proposal_id, support_grant_id, ip_address, user_agent,
-      prev_hash, event_hash, created_at
+      prev_hash, event_hash, chain_seq, created_at
     ) VALUES (
       ${stamp.id}::uuid,
       ${tenantId}::uuid,
@@ -148,6 +147,7 @@ export async function auditedUpdate(
       ${userAgent},
       ${prevHash},
       ${eventHashValue},
+      ${chainSeq},
       ${stamp.created_at}::timestamptz
     )
   `);
@@ -177,13 +177,29 @@ async function nextStamp(tx: TenantTx): Promise<Stamp> {
   return stamp;
 }
 
+async function nextChainSeq(tx: TenantTx, tenantId: string): Promise<number> {
+  const rows = queryRows<{ chain_seq: number | string }>(
+    await tx.execute(sql`
+      SELECT (COALESCE(MAX(chain_seq), 0) + 1)::bigint AS chain_seq
+      FROM aud_events
+      WHERE tenant_id = ${tenantId}::uuid
+    `),
+  );
+  const chainSeq = Number(rows[0]?.chain_seq);
+  if (!Number.isSafeInteger(chainSeq) || chainSeq < 1) {
+    throw new Error("audit chain sequence failed");
+  }
+  return chainSeq;
+}
+
 async function previousHash(tx: TenantTx, tenantId: string): Promise<string> {
   const rows = queryRows<HashRow>(
     await tx.execute(sql`
       SELECT event_hash
       FROM aud_events
       WHERE tenant_id = ${tenantId}::uuid
-      ORDER BY created_at DESC, id DESC
+        AND chain_seq IS NOT NULL
+      ORDER BY aud_events.chain_seq DESC
       LIMIT 1
     `),
   );

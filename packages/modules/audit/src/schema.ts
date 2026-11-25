@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -7,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -38,9 +40,15 @@ export const audEvents = pgTable(
     userAgent: text("user_agent"),
     prevHash: text("prev_hash"),
     eventHash: text("event_hash"),
+    chainSeq: bigint("chain_seq", { mode: "number" }),
     createdAt: createdAt(),
   },
-  (table) => [index("aud_events_tenant_created_idx").on(table.tenantId, table.createdAt, table.id)],
+  (table) => [
+    index("aud_events_tenant_created_idx").on(table.tenantId, table.createdAt, table.id),
+    uniqueIndex("aud_events_tenant_chain_seq_uidx")
+      .on(table.tenantId, table.chainSeq)
+      .where(sql`chain_seq IS NOT NULL`),
+  ],
 );
 
 export const audPiiAccessLogs = pgTable(
@@ -72,7 +80,9 @@ export const audOutboxEvents = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
-    index("aud_outbox_events_pending_idx").on(table.createdAt, table.id),
+    index("aud_outbox_events_pending_idx")
+      .on(table.createdAt, table.id)
+      .where(sql`published_at IS NULL`),
   ],
 );
 

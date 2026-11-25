@@ -64,7 +64,10 @@ async function grantOutbox(client: pg.Client): Promise<void> {
   await client.query(`REVOKE ALL ON TABLE ${table} FROM ${APP_ROLE}`);
   await client.query(`GRANT SELECT, INSERT ON TABLE ${table} TO ${APP_ROLE}`);
   await client.query(`GRANT USAGE ON SCHEMA public TO ${QUEUE_ROLE}`);
-  await client.query(`GRANT SELECT, UPDATE ON TABLE ${table} TO ${QUEUE_ROLE}`);
+  await client.query(`GRANT SELECT ON TABLE ${table} TO ${QUEUE_ROLE}`);
+  await client.query(
+    `GRANT UPDATE (published_at, attempts, last_error) ON TABLE ${table} TO ${QUEUE_ROLE}`,
+  );
 }
 
 const dispatcherPolicySql = `
@@ -98,6 +101,7 @@ CREATE TABLE IF NOT EXISTS aud_events (
   user_agent text,
   prev_hash text,
   event_hash text,
+  chain_seq bigint,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT aud_events_hash_pair CHECK (
     (prev_hash IS NULL AND event_hash IS NULL)
@@ -106,6 +110,10 @@ CREATE TABLE IF NOT EXISTS aud_events (
 );
 CREATE INDEX IF NOT EXISTS aud_events_tenant_created_idx
   ON aud_events (tenant_id, created_at, id);
+ALTER TABLE aud_events ADD COLUMN IF NOT EXISTS chain_seq bigint;
+CREATE UNIQUE INDEX IF NOT EXISTS aud_events_tenant_chain_seq_uidx
+  ON aud_events (tenant_id, chain_seq)
+  WHERE chain_seq IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS aud_pii_access_logs (
   id uuid PRIMARY KEY DEFAULT uuidv7(),

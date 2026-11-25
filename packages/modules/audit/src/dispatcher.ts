@@ -20,9 +20,27 @@ interface ClaimedRow {
 }
 
 /**
+ * Job id and singleton slot stay equal to the outbox id for the retention window.
+ * A crash after pg-boss commits and before `published_at` commits retries the same id.
+ * `send` returns null when that id already exists, and the row is still marked published.
+ */
+export function outboxJobOptions(outboxId: string): {
+  id: string;
+  singletonKey: string;
+  singletonSeconds: number;
+  deleteAfterSeconds: number;
+} {
+  return {
+    id: outboxId,
+    singletonKey: outboxId,
+    singletonSeconds: OUTBOX_RETENTION_SECONDS,
+    deleteAfterSeconds: OUTBOX_RETENTION_SECONDS,
+  };
+}
+
+/**
  * Publishes unpublished outbox rows through pg-boss and sets `published_at`.
- * A row that already has `published_at` is skipped. `singletonKey` is the outbox id,
- * so a retry after a crash does not enqueue a second job.
+ * A row that already has `published_at` is skipped.
  */
 export async function dispatchOutboxOnce(
   boss: PgBoss,
@@ -39,7 +57,7 @@ export async function dispatchOutboxOnce(
       `SELECT id::text AS id, tenant_id::text AS tenant_id, topic, payload
        FROM aud_outbox_events
        WHERE published_at IS NULL
-       ORDER BY created_at, id
+       ORDER BY aud_outbox_events.created_at, aud_outbox_events.id
        LIMIT $1
        FOR UPDATE SKIP LOCKED`,
       [batch],
@@ -56,10 +74,7 @@ export async function dispatchOutboxOnce(
             topic: row.topic,
             payload: row.payload,
           },
-          {
-            singletonKey: row.id,
-            deleteAfterSeconds: OUTBOX_RETENTION_SECONDS,
-          },
+          outboxJobOptions(row.id),
         );
         const updated = await client.query(
           `UPDATE aud_outbox_events
