@@ -55,3 +55,53 @@ export {
 export type { CalculationTableOptions } from "./tables/select.ts";
 export { terCategories } from "./tables/types.ts";
 export type { StatutoryTable, TerCategory } from "./tables/types.ts";
+
+// Slice 4.3. Keep this block at the end of the file.
+export {
+  buildCoretaxBatch,
+  buildCoretaxSlip,
+  CoretaxPreflightError,
+  CoretaxWithholderError,
+  coretaxSlipTypes,
+  coretaxXsdDirectory,
+  escapeXml,
+  findCoretaxXsdFiles,
+  formatScaledPercent,
+  preflightCoretaxRecords,
+  validateCoretaxXml,
+} from "./coretax/index.ts";
+export type {
+  Bpa1Amounts,
+  Bpa1Record,
+  Bp21Record,
+  Bp26Record,
+  BpmpRecord,
+  CoretaxBatchResult,
+  CoretaxFieldIssue,
+  CoretaxPreflightIssue,
+  CoretaxPreflightReport,
+  CoretaxRecord,
+  CoretaxSlipType,
+  CoretaxWithholder,
+  CounterpartOpt,
+  ScaledRate,
+  XsdValidation,
+} from "./coretax/index.ts";
+export {
+  BankBatchInputError,
+  bankBatchIds,
+  formatBankBatch,
+  formatBcaKlikbisnis,
+  formatBniDirect,
+  formatBriQlola,
+  formatMandiriKopra,
+  verifyBankBatch,
+} from "./bank-batch/index.ts";
+export type {
+  BankBatchExclusion,
+  BankBatchFile,
+  BankBatchId,
+  BankBatchInput,
+  BankBatchVerification,
+  BankPayment,
+} from "./bank-batch/index.ts";
