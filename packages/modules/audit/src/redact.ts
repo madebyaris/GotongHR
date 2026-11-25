@@ -92,6 +92,52 @@ function ownKeys(value: object): string[] {
   });
 }
 
+const FREE_TEXT_PII = [
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu,
+  /\d{2}[.\s]\d{3}[.\s]\d{3}[.\s]\d[-]\d{3}[.\s]\d{3,4}/gu,
+  /(?:\+62|62)[\s.-]?8\d{2,3}(?:[\s.-]?\d{3,4}){2,3}/gu,
+  /\b08\d{8,11}\b/gu,
+  /\+[1-9]\d{7,14}\b/gu,
+  /\b\d{10,}\b/gu,
+];
+
+/**
+ * Key redaction, then any NIK, NPWP, bank, phone, or email still sitting in a string.
+ * Append-only AI events use this. `redactPii` itself stays key-based.
+ */
+export function scrubFreeTextPii(value: unknown): unknown {
+  return maskWalk(redactPii(value));
+}
+
+function maskWalk(value: unknown): unknown {
+  if (typeof value === "string") return maskText(value);
+  if (Array.isArray(value)) return value.map((item) => maskWalk(item));
+  if (!value || typeof value !== "object") return value;
+  const out = Object.create(null) as Record<string, unknown>;
+  for (const key of Object.keys(value)) {
+    defineOwn(out, key, maskWalk((value as Record<string, unknown>)[key]));
+  }
+  return out;
+}
+
+const UUID_TEXT = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
+
+function maskText(text: string): string {
+  const uuids: string[] = [];
+  UUID_TEXT.lastIndex = 0;
+  const parked = text.replace(UUID_TEXT, (match) => {
+    const token = `«u${uuids.length}»`;
+    uuids.push(match);
+    return token;
+  });
+  let out = parked;
+  for (const pattern of FREE_TEXT_PII) {
+    pattern.lastIndex = 0;
+    out = out.replace(pattern, "[redacted]");
+  }
+  return out.replace(/«u(\d+)»/gu, (_match, index: string) => uuids[Number(index)] ?? "");
+}
+
 function defineOwn(target: Record<string, unknown>, key: string, value: unknown): void {
   Object.defineProperty(target, key, {
     value,

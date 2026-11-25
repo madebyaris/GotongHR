@@ -42,7 +42,10 @@
         "GOTONG_AUTH_RATE_LIMIT_MAX",
         "GOTONG_AUTH_RATE_LIMIT_WINDOW_MS",
         "GOTONG_PII_KEK",
-        "AUDIT_HASH_CHAIN"
+        "AUDIT_HASH_CHAIN",
+        "LLM_PROVIDER",
+        "XAI_API_KEY",
+        "LLM_MODEL"
       ]
     },
     "build": {

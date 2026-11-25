@@ -7,7 +7,7 @@ import {
   genesisHash,
 } from "./hash-chain.ts";
 import { hashChainEnabledForTenant } from "./keys.ts";
-import { redactPii } from "./redact.ts";
+import { redactPii, scrubFreeTextPii } from "./redact.ts";
 import { assertUuid, queryRows, quoteIdentifier } from "./sql.ts";
 import { assertSameTenant } from "./tenant.ts";
 
@@ -79,10 +79,7 @@ export async function auditedUpdate(
     assertSqlValue(input.assignments[name]);
   }
 
-  await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`gotonghr.audit.append\n${tenantId}`}, 0))`,
-  );
-  const chain = await hashChainEnabledForTenant(tx, tenantId);
+  await lockAuditAppend(tx, tenantId);
 
   const updated = queryRows<{ before_json: unknown; after_json: unknown }>(
     await tx.execute(sql`
@@ -102,28 +99,104 @@ export async function auditedUpdate(
   if (!row) throw new Error("audit target was not found");
   const before = asRecord(redactPii(asRecord(row.before_json)));
   const after = asRecord(redactPii(asRecord(row.after_json)));
-  const diff = { before, after };
+  const eventId = await insertAuditEvent(tx, {
+    tenantId,
+    actorUserId,
+    actorRole,
+    action,
+    resourceType,
+    resourceId,
+    diff: { before, after },
+    aiProposalId,
+    supportGrantId,
+    ipAddress,
+    userAgent,
+  });
 
+  return { eventId, before, after };
+}
+
+export interface AuditAppendInput {
+  tenantId: string;
+  actorUserId: string;
+  action: string;
+  resourceType: string;
+  diff: Record<string, unknown>;
+  actorRole?: string;
+  resourceId?: string | null;
+  aiProposalId?: string | null;
+  supportGrantId?: string | null;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+/**
+ * Appends one `aud_events` row on the caller's transaction.
+ * PII object keys and raw NIK, NPWP, bank, phone, and email text are removed
+ * before the JSON is stored. The hash chain matches `auditedUpdate`.
+ */
+export async function appendAuditEvent(
+  tx: TenantTx,
+  input: AuditAppendInput,
+): Promise<{ eventId: string }> {
+  const tenantId = await assertSameTenant(tx, input.tenantId);
+  const actorUserId = assertUuid(input.actorUserId, "actor user id");
+  const action = requiredText(input.action, "action", 80);
+  const resourceType = requiredText(input.resourceType, "resource type", 80);
+  const diff = asRecord(scrubFreeTextPii(input.diff));
+  const eventId = await insertAuditEvent(tx, {
+    tenantId,
+    actorUserId,
+    actorRole: optionalText(input.actorRole, 80),
+    action,
+    resourceType,
+    resourceId: optionalUuid(input.resourceId, "resource id"),
+    diff,
+    aiProposalId: optionalUuid(input.aiProposalId, "ai proposal id"),
+    supportGrantId: optionalUuid(input.supportGrantId, "support grant id"),
+    ipAddress: optionalText(input.ipAddress, 64),
+    userAgent: optionalText(input.userAgent, 512),
+  });
+  return { eventId };
+}
+
+interface StoredAuditInsert {
+  tenantId: string;
+  actorUserId: string;
+  actorRole: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  diff: Record<string, unknown>;
+  aiProposalId: string | null;
+  supportGrantId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+async function insertAuditEvent(tx: TenantTx, input: StoredAuditInsert): Promise<string> {
+  await lockAuditAppend(tx, input.tenantId);
+  const chain = await hashChainEnabledForTenant(tx, input.tenantId);
   let prevHash: string | null = null;
   let eventHashValue: string | null = null;
   let chainSeq: number | null = null;
   const stamp = await nextStamp(tx);
   if (chain) {
-    chainSeq = await nextChainSeq(tx, tenantId);
-    prevHash = await previousHash(tx, tenantId);
+    chainSeq = await nextChainSeq(tx, input.tenantId);
+    prevHash = await previousHash(tx, input.tenantId);
     eventHashValue = eventHash({
       id: stamp.id,
-      tenantId,
-      actorUserId,
-      actorRole,
-      action,
-      resourceType,
-      resourceId,
-      diff,
-      aiProposalId,
-      supportGrantId,
-      ipAddress,
-      userAgent,
+      tenantId: input.tenantId,
+      actorUserId: input.actorUserId,
+      actorRole: input.actorRole,
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      diff: input.diff,
+      aiProposalId: input.aiProposalId,
+      supportGrantId: input.supportGrantId,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
       createdAt: stamp.created_at,
       prevHash,
       chainSeq,
@@ -137,25 +210,30 @@ export async function auditedUpdate(
       prev_hash, event_hash, chain_seq, created_at
     ) VALUES (
       ${stamp.id}::uuid,
-      ${tenantId}::uuid,
-      ${actorUserId}::uuid,
-      ${actorRole},
-      ${action},
-      ${resourceType},
-      ${resourceId}::uuid,
-      ${JSON.stringify(diff)}::jsonb,
-      ${aiProposalId}::uuid,
-      ${supportGrantId}::uuid,
-      ${ipAddress},
-      ${userAgent},
+      ${input.tenantId}::uuid,
+      ${input.actorUserId}::uuid,
+      ${input.actorRole},
+      ${input.action},
+      ${input.resourceType},
+      ${input.resourceId}::uuid,
+      ${JSON.stringify(input.diff)}::jsonb,
+      ${input.aiProposalId}::uuid,
+      ${input.supportGrantId}::uuid,
+      ${input.ipAddress},
+      ${input.userAgent},
       ${prevHash},
       ${eventHashValue},
       ${chainSeq},
       ${stamp.created_at}::timestamptz
     )
   `);
+  return stamp.id;
+}
 
-  return { eventId: stamp.id, before, after };
+async function lockAuditAppend(tx: TenantTx, tenantId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`gotonghr.audit.append\n${tenantId}`}, 0))`,
+  );
 }
 
 function assignmentSql(assignments: Readonly<Record<string, SqlValue>>): SQL {
@@ -246,7 +324,7 @@ function optionalText(value: string | undefined, max: number): string | null {
   return trimmed;
 }
 
-function optionalUuid(value: string | undefined, label: string): string | null {
-  if (value === undefined) return null;
+function optionalUuid(value: string | null | undefined, label: string): string | null {
+  if (value === undefined || value === null) return null;
   return assertUuid(value, label);
 }
