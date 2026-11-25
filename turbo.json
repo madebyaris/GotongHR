@@ -29,7 +29,13 @@
         "QUEUE_DRIVER",
         "GOTONG_ROLE",
         "GOTONG_DEPLOYMENT_MODE",
-        "NODE_ENV"
+        "NODE_ENV",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "GOTONG_BOOTSTRAP_EMAIL",
+        "GOTONG_BOOTSTRAP_PASSWORD",
+        "GOTONG_BOOTSTRAP_TENANT_NAME",
+        "GOTONG_BOOTSTRAP_OWNER_NAME"
       ]
     },
     "build": {

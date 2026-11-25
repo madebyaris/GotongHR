@@ -5,6 +5,7 @@ import {
   requiredEnv,
   type TenantDatabase,
 } from "@gotonghr/db";
+import { createAuth, registerIdentity, type GotongAuth } from "@gotonghr/identity";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { readConfig, type AppConfig } from "./config.ts";
@@ -16,6 +17,7 @@ export interface ComposedApp {
   app: FastifyInstance;
   config: AppConfig;
   appDb: TenantDatabase;
+  auth: GotongAuth;
   boss: PgBoss;
   close(): Promise<void>;
 }
@@ -46,11 +48,14 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
       }
     },
   });
+  const auth = createAuth({ appDb, env });
+  await registerIdentity(app, { auth, appDb, env });
 
   return {
     app,
     config,
     appDb,
+    auth,
     boss,
     close() {
       closing ??= (async () => {

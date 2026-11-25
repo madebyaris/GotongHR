@@ -22,6 +22,16 @@ docker compose --env-file .env -f docker/docker-compose.vps.yml up -d --build
 
 The shell is served at `http://localhost/`. Readiness is `http://localhost/api/readyz`. Compose reads variables from the repo-root `.env` only when `--env-file .env` is set, because the compose file lives in `docker/`. A one-shot `migrate` service applies roles and the queue schema, then exits. The API process does not connect as the database superuser.
 
+## Bootstrap
+
+`GOTONG_DEPLOYMENT_MODE=single_tenant` is the default. After migrate, create the one tenant and its `org_owner`:
+
+```bash
+pnpm --filter @gotonghr/api bootstrap
+```
+
+Set `GOTONG_BOOTSTRAP_EMAIL` and `GOTONG_BOOTSTRAP_PASSWORD` (at least 12 characters). The same email returns the existing tenant. A different email is refused, and a second tenant is not created. `NODE_ENV=production` refuses the placeholder auth secret and the placeholder bootstrap password. Sign-in is mounted at `/api/auth/*`. Login and password reset are limited to 10 requests a minute per IP. `/api/v1/platform/*` is not mounted. Session cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`, so a browser stores them only after TLS terminates in front of the API.
+
 Postgres is published on `127.0.0.1:5432` and the API on `127.0.0.1:3000`. Caddy publishes port 80. TLS is not configured in this slice: the Phase 0 checks use HTTP until a hostname exists.
 
 The 1 GB profile tightens the same stack:

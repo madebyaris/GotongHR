@@ -46,6 +46,12 @@ jobs:
       GOTONG_ROLE: monolith
       GOTONG_DEPLOYMENT_MODE: single_tenant
       NODE_ENV: test
+      BETTER_AUTH_SECRET: ci-auth-secret-0123456789abcdef
+      BETTER_AUTH_URL: http://127.0.0.1:3000
+      GOTONG_BOOTSTRAP_EMAIL: owner@gotonghr.test
+      GOTONG_BOOTSTRAP_PASSWORD: owner-password-1
+      GOTONG_BOOTSTRAP_TENANT_NAME: GotongHR
+      GOTONG_BOOTSTRAP_OWNER_NAME: Owner
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
