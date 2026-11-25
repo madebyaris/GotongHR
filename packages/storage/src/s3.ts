@@ -1,11 +1,7 @@
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { assertObjectKey } from "./keys.ts";
+import { assertObjectKey, tokenExpiry } from "./keys.ts";
 import { MAX_UPLOAD_BYTES, type ObjectStorage, type PresignPutInput } from "./types.ts";
 
 export interface S3StorageOptions {
@@ -23,6 +19,10 @@ export interface S3ObjectStorage extends ObjectStorage {
   kind: "s3";
 }
 
+function lifetime(expiresInSeconds: number | undefined): number {
+  return tokenExpiry(expiresInSeconds) - Math.floor(Date.now() / 1000);
+}
+
 export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
   const client = new S3Client({
     region: options.region,
@@ -31,10 +31,6 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
     ...(options.credentials ? { credentials: options.credentials } : {}),
   });
 
-  function expiresIn(value: number | undefined): number {
-    return value ?? 900;
-  }
-
   return {
     kind: "s3",
     async presignPut(input: PresignPutInput) {
@@ -42,19 +38,21 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
         throw new Error("Upload cap cannot exceed 2 MB.");
       }
       assertObjectKey(input.key);
-      const url = await getSignedUrl(
-        client,
-        new PutObjectCommand({
-          Bucket: options.bucket,
-          Key: input.key,
-          ContentType: input.contentType,
-        }),
-        { expiresIn: expiresIn(input.expiresInSeconds) },
-      );
+      const posted = await createPresignedPost(client, {
+        Bucket: options.bucket,
+        Key: input.key,
+        Expires: lifetime(input.expiresInSeconds),
+        Fields: { "Content-Type": input.contentType },
+        Conditions: [
+          ["content-length-range", 0, input.maxBytes],
+          ["eq", "$Content-Type", input.contentType],
+        ],
+      });
       return {
-        url,
-        method: "PUT",
-        headers: { "content-type": input.contentType },
+        url: posted.url,
+        method: "POST",
+        headers: {},
+        fields: posted.fields,
       };
     },
     async presignGet(input) {
@@ -62,15 +60,13 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
       const url = await getSignedUrl(
         client,
         new GetObjectCommand({ Bucket: options.bucket, Key: input.key }),
-        { expiresIn: expiresIn(input.expiresInSeconds) },
+        { expiresIn: lifetime(input.expiresInSeconds) },
       );
       return { url, method: "GET" };
     },
     async delete(input) {
       assertObjectKey(input.key);
-      await client.send(
-        new DeleteObjectCommand({ Bucket: options.bucket, Key: input.key }),
-      );
+      await client.send(new DeleteObjectCommand({ Bucket: options.bucket, Key: input.key }));
     },
   };
 }

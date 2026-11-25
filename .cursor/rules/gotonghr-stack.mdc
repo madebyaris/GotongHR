@@ -5,7 +5,7 @@ alwaysApply: true
 
 # GotongHR stack
 
-- Runtime is Node 22.12 or newer. Package manager is pnpm. Build graph is Turborepo.
+- Runtime is Node 22.13 or newer. Package manager is pnpm. Build graph is Turborepo.
 - Apps are Vite and Fastify. Do not add Next.js, Redis, Prisma, or a headless browser.
 - Money is integer rupiah in `bigint`. The UI formats it. The UI does not compute tax.
 - `packages/payroll-engine` does no database, network, or LLM work.

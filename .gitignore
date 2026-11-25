@@ -4,6 +4,11 @@ dist
 .data
 .env
 .env.local
+**/.env
+**/.env.local
+**/.env.*.local
 *.tsbuildinfo
+**/*.tsbuildinfo
 coverage
+**/coverage
 .DS_Store

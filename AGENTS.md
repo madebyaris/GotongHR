@@ -18,7 +18,7 @@ interrogate reviewers: grok-4.7-xhigh, claude-opus-5-5-high, gemini-4-neon-xhigh
 arena cross-judge pool: claude-opus-5-5-high, gemini-4-neon-xhigh
 ```
 
-The judge pool omits Grok because the parent worker is Grok. If `~/.cursor/rules/pstack-models.mdc` is missing, write it with `alwaysApply: true` and these lines. If it exists and differs, stop and show the diff.
+The judge pool omits Grok because the parent worker is Grok. This map stays in the repository. Do not write it into the home directory.
 
 ## Shared check
 
@@ -37,7 +37,7 @@ Also run:
 pnpm exec depcruise --config tooling/arch-tests/.dependency-cruiser.cjs packages apps
 ```
 
-`pnpm test` needs Postgres 18 from `docker compose -f docker/docker-compose.vps.yml up -d postgres` and a `.env` copied from `.env.example`.
+`pnpm test` needs Postgres 18 from `docker compose --env-file .env -f docker/docker-compose.vps.yml up -d postgres` and a `.env` copied from `.env.example`.
 
 ## Slice checks
 
@@ -47,10 +47,10 @@ Use the command named for the slice. Do not invent a replacement.
 | :--- | :--- |
 | 0.1 | `pnpm install`, `pnpm typecheck`, `pnpm lint`, and the depcruise command above |
 | 0.2 | `pnpm --filter @gotonghr/db test` |
-| 0.3 | `pnpm --filter @gotonghr/api test` and `docker compose -f docker/docker-compose.vps.yml up -d postgres api` |
-| 0.4 | `pnpm --filter @gotonghr/web build`, `node apps/web/scripts/bundle-budget.mjs`, and `docker compose -f docker/docker-compose.vps.yml -f docker/docker-compose.vps.1g.yml up -d` |
+| 0.3 | `pnpm --filter @gotonghr/api test` and `docker compose --env-file .env -f docker/docker-compose.vps.yml up -d postgres api` |
+| 0.4 | `pnpm --filter @gotonghr/web build`, `node apps/web/scripts/bundle-budget.mjs`, and `docker compose --env-file .env -f docker/docker-compose.vps.yml -f docker/docker-compose.vps.1g.yml up -d` |
 | Every later slice | The shared check, depcruise, and the slice command in the implementation plan |
 
 ## Stack
 
-Node 22.12 or newer, pnpm, Turborepo, Vite, Fastify, PostgreSQL 18. Do not add Next.js, Redis, Prisma, or a headless browser. Money is integer rupiah in `bigint`. `packages/payroll-engine` does no database, network, or LLM work. Modules talk through ports in `packages/contracts`. Request-time database roles do not have `BYPASSRLS`.
+Node 22.13 or newer, pnpm, Turborepo, Vite, Fastify, PostgreSQL 18. Do not add Next.js, Redis, Prisma, or a headless browser. Money is integer rupiah in `bigint`. `packages/payroll-engine` does no database, network, or LLM work. Modules talk through ports in `packages/contracts`. Request-time database roles do not have `BYPASSRLS`.

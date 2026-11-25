@@ -16,6 +16,13 @@ function rowsOf(result: { rows?: unknown[]; rowCount?: number | null }): number 
   return result.rows?.length ?? 0;
 }
 
+function isRlsViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const current = error as { code?: string; cause?: unknown };
+  if (current.code === "42501") return true;
+  return isRlsViolation(current.cause);
+}
+
 describe("tenant row security", { concurrency: 1 }, () => {
   const tenantA = randomUUID();
   const tenantB = randomUUID();
@@ -80,6 +87,26 @@ describe("tenant row security", { concurrency: 1 }, () => {
       const visible = await tx.execute(sql`select id from rls_probe`);
       assert.equal(rowsOf(visible), 1);
     });
+  });
+
+  it("rejects a write that names another tenant", async () => {
+    await assert.rejects(
+      app.withTenantContext(tenantA, async (tx) => {
+        await tx.execute(sql`insert into rls_probe (tenant_id) values (${tenantB}::uuid)`);
+      }),
+      isRlsViolation,
+    );
+    await app.withTenantContext(tenantA, async (tx) => {
+      await tx.execute(sql`insert into rls_probe (tenant_id) values (${tenantA}::uuid)`);
+    });
+    await assert.rejects(
+      app.withTenantContext(tenantA, async (tx) => {
+        await tx.execute(
+          sql`update rls_probe set tenant_id = ${tenantB}::uuid where tenant_id = ${tenantA}::uuid`,
+        );
+      }),
+      isRlsViolation,
+    );
   });
 
   it("drops the tenant setting when the transaction returns the connection", async () => {

@@ -3,23 +3,28 @@ export interface ApiError {
   message: string;
 }
 
-export interface ApiEnvelope<TData, TMeta = null> {
-  data: TData | null;
+export interface ApiSuccess<TData, TMeta> {
+  data: TData;
   meta: TMeta;
-  error: ApiError | null;
+  error: null;
 }
 
-export function ok<TData, TMeta = null>(
-  data: TData,
-  meta: TMeta = null as TMeta,
-): ApiEnvelope<TData, TMeta> {
+export interface ApiFailure<TMeta> {
+  data: null;
+  meta: TMeta;
+  error: ApiError;
+}
+
+export type ApiEnvelope<TData, TMeta = null> = ApiSuccess<TData, TMeta> | ApiFailure<TMeta>;
+
+export function ok<TData>(data: TData): ApiSuccess<TData, null>;
+export function ok<TData, TMeta>(data: TData, meta: TMeta): ApiSuccess<TData, TMeta>;
+export function ok(data: unknown, meta: unknown = null): ApiSuccess<unknown, unknown> {
   return { data, meta, error: null };
 }
 
-export function fail<TMeta = null>(
-  code: string,
-  message: string,
-  meta: TMeta = null as TMeta,
-): ApiEnvelope<null, TMeta> {
+export function fail(code: string, message: string): ApiFailure<null>;
+export function fail<TMeta>(code: string, message: string, meta: TMeta): ApiFailure<TMeta>;
+export function fail(code: string, message: string, meta: unknown = null): ApiFailure<unknown> {
   return { data: null, meta, error: { code, message } };
 }

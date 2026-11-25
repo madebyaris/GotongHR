@@ -25,6 +25,9 @@ export type TenantTx = Parameters<Parameters<AppDatabase["transaction"]>[0]>[0];
 
 export function createTenantDatabase(connectionString: string, max = 8): TenantDatabase {
   const pool = new Pool({ connectionString, max, statement_timeout: 10_000 });
+  pool.on("error", (error: Error) => {
+    process.stderr.write(`${JSON.stringify({ msg: "pg pool error", error: error.message })}\n`);
+  });
   const db = drizzle(pool, { schema });
   return {
     db,

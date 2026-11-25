@@ -1,3 +1,4 @@
+import { grantSchemaDml, QUEUE_ROLE } from "@gotonghr/db";
 import { PgBoss } from "pg-boss";
 
 export const BOSS_SCHEMA = "pgboss";
@@ -22,8 +23,17 @@ export function workerDefaults(): {
   };
 }
 
-export async function startBoss(connectionString: string): Promise<PgBoss> {
-  const boss = new PgBoss({ connectionString, schema: BOSS_SCHEMA });
+export async function startBoss(
+  connectionString: string,
+  options?: { provision?: boolean },
+): Promise<PgBoss> {
+  const provision = options?.provision === true;
+  const boss = new PgBoss({
+    connectionString,
+    schema: BOSS_SCHEMA,
+    createSchema: provision,
+    migrate: provision,
+  });
   boss.on("error", (error: Error) => {
     process.stderr.write(`${JSON.stringify({ msg: "pg-boss error", error: error.message })}\n`);
   });
@@ -35,4 +45,14 @@ export async function startBoss(connectionString: string): Promise<PgBoss> {
     await boss.createQueue(MAINTENANCE_QUEUE, queueDefaults());
   }
   return boss;
+}
+
+/** Creates the pg-boss schema as the migrator, then grants DML to gotong_queue. */
+export async function provisionQueue(migratorUrl: string): Promise<void> {
+  const boss = await startBoss(migratorUrl, { provision: true });
+  try {
+    await grantSchemaDml(migratorUrl, BOSS_SCHEMA, QUEUE_ROLE);
+  } finally {
+    await boss.stop({ graceful: false, close: true });
+  }
 }

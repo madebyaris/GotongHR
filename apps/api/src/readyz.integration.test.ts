@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import pg from "pg";
-import { loadRepoEnv, requiredEnv } from "@gotonghr/db";
+import { loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
 import { composeFromEnv, type ComposedApp } from "./composition.ts";
+import { provisionQueue } from "./queue.ts";
 
 const { Client } = pg;
 
@@ -15,8 +16,10 @@ describe("readyz against postgres", { concurrency: 1 }, () => {
   before(async () => {
     process.env.NODE_ENV = "test";
     process.env.STORAGE_DRIVER ??= "local";
-    process.env.STORAGE_LOCAL_SECRET ??= "change-me";
+    process.env.STORAGE_LOCAL_SECRET = "local-test-storage-secret";
     process.env.QUEUE_DRIVER ??= "pgboss";
+    await migrate(migrateEnvFrom(process.env));
+    await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
     composed = await composeFromEnv(process.env);
   });
 
@@ -56,7 +59,10 @@ describe("readyz against postgres", { concurrency: 1 }, () => {
       assert.ok(tables.rows.length > 0);
       const name = tables.rows[0]?.tablename;
       assert.ok(name && /^[a-z0-9_]+$/.test(name));
-      await assert.rejects(composed.appDb.pool.query(`DROP TABLE pgboss.${name}`));
+      await assert.rejects(composed.appDb.pool.query(`DROP TABLE pgboss.${name}`), (error: unknown) => {
+        const current = error as { code?: string; cause?: { code?: string } };
+        return current.code === "42501" || current.cause?.code === "42501";
+      });
     } finally {
       await migrator.end();
     }

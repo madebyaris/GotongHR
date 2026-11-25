@@ -10,9 +10,19 @@ test("the JSON envelope keeps data, meta, and error together", () => {
     meta: null,
     error: null,
   });
+  assert.deepEqual(ok({ status: "ok" }, { page: 1 }), {
+    data: { status: "ok" },
+    meta: { page: 1 },
+    error: null,
+  });
   assert.deepEqual(fail("not_ready", "database"), {
     data: null,
     meta: null,
+    error: { code: "not_ready", message: "database" },
+  });
+  assert.deepEqual(fail("not_ready", "database", { page: 1 }), {
+    data: null,
+    meta: { page: 1 },
     error: { code: "not_ready", message: "database" },
   });
 });

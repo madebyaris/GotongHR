@@ -9,7 +9,7 @@ export function tenantIsolationPolicySql(tableName: string): string {
     throw new Error(`invalid table name: ${tableName}`);
   }
   const predicate =
-    "tenant_id = current_setting('app.current_tenant_id', true)::uuid";
+    "tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid";
   return [
     `ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY`,
     `ALTER TABLE ${tableName} FORCE ROW LEVEL SECURITY`,

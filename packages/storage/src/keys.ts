@@ -4,6 +4,8 @@ import { MAX_UPLOAD_BYTES } from "./types.ts";
 
 const keyPattern = /^[A-Za-z0-9][A-Za-z0-9/_.-]{0,200}$/;
 
+export const MAX_TOKEN_TTL_SECONDS = 900;
+
 export interface ObjectToken {
   key: string;
   method: "PUT" | "GET";
@@ -27,7 +29,29 @@ export function resolveObjectPath(rootDir: string, key: string): string {
   return full;
 }
 
+export function tokenExpiry(expiresInSeconds: number | undefined, now = Date.now()): number {
+  const ttl = expiresInSeconds ?? MAX_TOKEN_TTL_SECONDS;
+  if (!Number.isInteger(ttl) || ttl < 1 || ttl > MAX_TOKEN_TTL_SECONDS) {
+    throw new Error("Token lifetime must be a whole number of seconds up to 900.");
+  }
+  return Math.floor(now / 1000) + ttl;
+}
+
+export function assertTokenExpiry(exp: number, now = Date.now()): void {
+  if (!Number.isInteger(exp)) {
+    throw new Error("Object token expiry is invalid.");
+  }
+  const seconds = Math.floor(now / 1000);
+  if (exp <= seconds) {
+    throw new Error("Object token is expired.");
+  }
+  if (exp > seconds + MAX_TOKEN_TTL_SECONDS) {
+    throw new Error("Object token lifetime is too long.");
+  }
+}
+
 export function signToken(token: ObjectToken, secret: string): string {
+  assertTokenExpiry(token.exp);
   const body = Buffer.from(JSON.stringify(token)).toString("base64url");
   const mac = createHmac("sha256", secret).update(body).digest("base64url");
   return `${body}.${mac}`;
@@ -55,9 +79,7 @@ export function readToken(token: string, secret: string, method: ObjectToken["me
   if (typeof record.maxBytes !== "number" || record.maxBytes < 1 || record.maxBytes > MAX_UPLOAD_BYTES) {
     throw new Error("Object token size cap is invalid.");
   }
-  if (record.exp * 1000 <= Date.now()) {
-    throw new Error("Object token is expired.");
-  }
+  assertTokenExpiry(record.exp);
   assertObjectKey(record.key);
   return {
     key: record.key,

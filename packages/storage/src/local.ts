@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -7,6 +8,7 @@ import {
   readToken,
   resolveObjectPath,
   signToken,
+  tokenExpiry,
   type ObjectToken,
 } from "./keys.ts";
 import { MAX_UPLOAD_BYTES, type ObjectStorage, type PresignPutInput } from "./types.ts";
@@ -68,7 +70,7 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
         {
           key: input.key,
           method: "PUT",
-          exp: Math.floor(Date.now() / 1000) + (input.expiresInSeconds ?? 900),
+          exp: tokenExpiry(input.expiresInSeconds),
           maxBytes: input.maxBytes,
         },
         secret,
@@ -85,7 +87,7 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
         {
           key: input.key,
           method: "GET",
-          exp: Math.floor(Date.now() / 1000) + (input.expiresInSeconds ?? 900),
+          exp: tokenExpiry(input.expiresInSeconds),
           maxBytes: MAX_UPLOAD_BYTES,
         },
         secret,
@@ -121,11 +123,18 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
               return envelope(reply, 400, "empty_body", "Upload body is missing.");
             }
             if (body.length > claims.maxBytes) {
-              return envelope(reply, 413, "too_large", "Upload exceeds 2 MB.");
+              return envelope(reply, 413, "too_large", `Upload exceeds ${claims.maxBytes} bytes.`);
             }
             const destination = resolveObjectPath(rootDir, claims.key);
+            const temporary = `${destination}.${randomBytes(8).toString("hex")}.partial`;
             await mkdir(path.dirname(destination), { recursive: true });
-            await writeFile(destination, body);
+            try {
+              await writeFile(temporary, body);
+              await rename(temporary, destination);
+            } catch (error) {
+              await rm(temporary, { force: true });
+              throw error;
+            }
             return { data: { key: claims.key }, meta: null, error: null };
           },
         );

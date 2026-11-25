@@ -1,5 +1,5 @@
 import pg from "pg";
-import { requiredEnv } from "./env.ts";
+import { assertProductionSecret, requiredEnv } from "./env.ts";
 import { tenantIsolationPolicySql } from "./policy.ts";
 
 const { Client } = pg;
@@ -7,6 +7,9 @@ const { Client } = pg;
 export const APP_ROLE = "app_tenant";
 export const PLATFORM_ROLE = "platform_admin";
 export const MIGRATOR_ROLE = "gotong_migrator";
+export const QUEUE_ROLE = "gotong_queue";
+
+const identifier = /^[a-z_][a-z0-9_]*$/;
 
 export interface MigrateEnv {
   superuserUrl: string;
@@ -14,16 +17,23 @@ export interface MigrateEnv {
   migratorPassword: string;
   appPassword: string;
   platformPassword: string;
+  queuePassword: string;
 }
 
 export function migrateEnvFrom(env: NodeJS.ProcessEnv): MigrateEnv {
-  return {
+  const input: MigrateEnv = {
     superuserUrl: requiredEnv(env, "DATABASE_URL_SUPERUSER"),
     migratorUrl: requiredEnv(env, "DATABASE_URL_MIGRATOR"),
     migratorPassword: requiredEnv(env, "MIGRATOR_PASSWORD"),
     appPassword: requiredEnv(env, "APP_PASSWORD"),
     platformPassword: requiredEnv(env, "PLATFORM_PASSWORD"),
+    queuePassword: requiredEnv(env, "QUEUE_PASSWORD"),
   };
+  assertProductionSecret("MIGRATOR_PASSWORD", input.migratorPassword);
+  assertProductionSecret("APP_PASSWORD", input.appPassword);
+  assertProductionSecret("PLATFORM_PASSWORD", input.platformPassword);
+  assertProductionSecret("QUEUE_PASSWORD", input.queuePassword);
+  return input;
 }
 
 interface StatementRow {
@@ -68,8 +78,8 @@ function databaseName(connectionString: string): string {
 }
 
 /**
- * Creates the three database roles, then applies the probe schema as the migrator.
- * Request handlers never use the migrator role.
+ * Creates the database roles, then applies the probe schema as the migrator.
+ * Request handlers use app_tenant. The queue role is not the migrator.
  */
 export async function migrate(input: MigrateEnv): Promise<void> {
   const database = databaseName(input.superuserUrl);
@@ -79,12 +89,13 @@ export async function migrate(input: MigrateEnv): Promise<void> {
     await ensureRole(admin, MIGRATOR_ROLE, input.migratorPassword);
     await ensureRole(admin, APP_ROLE, input.appPassword);
     await ensureRole(admin, PLATFORM_ROLE, input.platformPassword);
+    await ensureRole(admin, QUEUE_ROLE, input.queuePassword);
     await runFormatted(
       admin,
       "SELECT format('GRANT CONNECT, CREATE ON DATABASE %I TO %I', $1::text, $2::text) AS stmt",
       [database, MIGRATOR_ROLE],
     );
-    for (const role of [APP_ROLE, PLATFORM_ROLE]) {
+    for (const role of [APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE]) {
       await runFormatted(
         admin,
         "SELECT format('GRANT CONNECT ON DATABASE %I TO %I', $1::text, $2::text) AS stmt",
@@ -93,7 +104,7 @@ export async function migrate(input: MigrateEnv): Promise<void> {
     }
     await admin.query(`ALTER SCHEMA public OWNER TO ${MIGRATOR_ROLE}`);
     await admin.query(
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${MIGRATOR_ROLE} IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE}`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${MIGRATOR_ROLE} IN SCHEMA public REVOKE SELECT, INSERT, UPDATE, DELETE ON TABLES FROM ${APP_ROLE}`,
     );
   } finally {
     await admin.end();
@@ -121,7 +132,33 @@ export async function migrate(input: MigrateEnv): Promise<void> {
     await migrator.query(`GRANT USAGE ON SCHEMA public TO ${PLATFORM_ROLE}`);
     await migrator.query(`REVOKE CREATE ON SCHEMA public FROM ${APP_ROLE}`);
     await migrator.query(`REVOKE CREATE ON SCHEMA public FROM ${PLATFORM_ROLE}`);
+    await migrator.query(`REVOKE CREATE ON SCHEMA public FROM ${QUEUE_ROLE}`);
   } finally {
     await migrator.end();
+  }
+}
+
+/** Grants DML on an existing schema. The caller creates the schema first. */
+export async function grantSchemaDml(
+  connectionString: string,
+  schema: string,
+  role: string,
+): Promise<void> {
+  if (!identifier.test(schema) || !identifier.test(role)) {
+    throw new Error("Invalid schema grant.");
+  }
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role}`);
+    await client.query(
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${schema} TO ${role}`,
+    );
+    await client.query(
+      `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ${schema} TO ${role}`,
+    );
+    await client.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${schema} TO ${role}`);
+  } finally {
+    await client.end();
   }
 }

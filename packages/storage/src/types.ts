@@ -9,8 +9,9 @@ export interface PresignPutInput {
 
 export interface PresignedPut {
   url: string;
-  method: "PUT";
+  method: "PUT" | "POST";
   headers: Record<string, string>;
+  fields?: Record<string, string>;
 }
 
 export interface PresignedGet {

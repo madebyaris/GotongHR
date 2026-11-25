@@ -107,12 +107,34 @@ export default tseslint.config(
               name: "fastify",
               message: "packages/payroll-engine does no network work.",
             },
+            {
+              name: "@gotonghr/db",
+              message: "packages/payroll-engine does no database work.",
+            },
+            {
+              name: "@gotonghr/storage",
+              message: "packages/payroll-engine does no storage work.",
+            },
           ],
           patterns: [
             {
-              group: ["drizzle-orm/*", "@aws-sdk/*", "**/packages/modules/**"],
+              group: [
+                "drizzle-orm/*",
+                "pg/*",
+                "postgres/*",
+                "fastify/*",
+                "@fastify/*",
+                "@aws-sdk/*",
+                "@gotonghr/db",
+                "@gotonghr/db/*",
+                "@gotonghr/storage",
+                "@gotonghr/storage/*",
+                "**/packages/modules/**",
+                "**/packages/db/**",
+                "**/packages/storage/**",
+              ],
               message:
-                "packages/payroll-engine does no database, network, or module work.",
+                "packages/payroll-engine does no database, network, storage, or module work.",
             },
           ],
         },

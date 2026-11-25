@@ -51,12 +51,40 @@ function shellBytes(manifest, routeHint) {
   return total;
 }
 
+function readDotenv(file) {
+  if (!existsSync(file)) return {};
+  const values = {};
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    values[key] = value;
+  }
+  return values;
+}
+
 const manifest = readManifest();
-const mode = process.env.VITE_DEPLOYMENT_MODE ?? "single_tenant";
-if (mode === "single_tenant") {
+const fileMode = {
+  ...readDotenv(path.join(appRoot, ".env")),
+  ...readDotenv(path.join(appRoot, ".env.local")),
+  ...readDotenv(path.join(appRoot, ".env.production")),
+  ...readDotenv(path.join(appRoot, ".env.production.local")),
+}.VITE_DEPLOYMENT_MODE;
+const mode = process.env.VITE_DEPLOYMENT_MODE ?? fileMode ?? "single_tenant";
+const multiTenant = mode === "multi_tenant_saas" || mode === "holding_multi_tenant";
+if (!multiTenant) {
   const platform = Object.keys(manifest).filter((key) => key.includes("routes/platform"));
   if (platform.length > 0) {
-    console.error(`single-tenant build includes the platform route: ${platform.join(", ")}`);
+    console.error(`build mode ${mode} includes the platform route: ${platform.join(", ")}`);
     process.exit(1);
   }
 }

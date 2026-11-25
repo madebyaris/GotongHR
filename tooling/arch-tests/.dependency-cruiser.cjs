@@ -16,10 +16,10 @@ module.exports = {
       name: "payroll-engine-stays-pure",
       severity: "error",
       comment:
-        "packages/payroll-engine cannot import drizzle-orm, pg, postgres, fastify, @aws-sdk/*, or packages/modules.",
+        "packages/payroll-engine cannot import drizzle-orm, pg, postgres, fastify, @aws-sdk/*, @gotonghr/db, @gotonghr/storage, or packages/modules.",
       from: { path: "^packages/payroll-engine/" },
       to: {
-        path: "(^|/)node_modules/(drizzle-orm|pg|postgres|fastify|@aws-sdk)(/|$)|^packages/modules/",
+        path: "(^|/)node_modules/(drizzle-orm|pg|postgres|fastify|@aws-sdk|@gotonghr/db|@gotonghr/storage)(/|$)|^packages/(modules|db|storage)/",
       },
     },
     {

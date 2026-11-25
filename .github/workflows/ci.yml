@@ -34,10 +34,12 @@ jobs:
       MIGRATOR_PASSWORD: migrator
       APP_PASSWORD: app
       PLATFORM_PASSWORD: platform
+      QUEUE_PASSWORD: queue
       DATABASE_URL_SUPERUSER: postgres://postgres:postgres@127.0.0.1:5432/gotonghr
       DATABASE_URL_MIGRATOR: postgres://gotong_migrator:migrator@127.0.0.1:5432/gotonghr
       DATABASE_URL_APP: postgres://app_tenant:app@127.0.0.1:5432/gotonghr
       DATABASE_URL_PLATFORM: postgres://platform_admin:platform@127.0.0.1:5432/gotonghr
+      DATABASE_URL_QUEUE: postgres://gotong_queue:queue@127.0.0.1:5432/gotonghr
       STORAGE_DRIVER: local
       STORAGE_LOCAL_SECRET: ci-secret
       QUEUE_DRIVER: pgboss
@@ -51,8 +53,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - name: Require Node 22.12 or newer
-        run: node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 12)) process.exit(1)'
+      - name: Require Node 22.13 or newer
+        run: node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 13)) process.exit(1)'
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint

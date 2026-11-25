@@ -44,7 +44,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
       try {
         await deps.checkReady();
         return ok({ status: "ready" as const });
-      } catch {
+      } catch (error) {
+        app.log.error({ err: error }, "readyz check failed");
         return reply.code(503).send(fail("not_ready", "not ready"));
       }
     },

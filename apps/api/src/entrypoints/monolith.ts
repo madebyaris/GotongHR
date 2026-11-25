@@ -1,10 +1,23 @@
 import { composeFromEnv } from "../composition.ts";
-import { readConfig } from "../config.ts";
 
 async function main(): Promise<void> {
-  const config = readConfig(process.env);
   const composed = await composeFromEnv(process.env);
-  await composed.app.listen({ host: config.host, port: config.port });
+  let stopping = false;
+  const stop = (): void => {
+    if (stopping) return;
+    stopping = true;
+    void composed.close().then(
+      () => {
+        process.exit(0);
+      },
+      () => {
+        process.exit(1);
+      },
+    );
+  };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+  await composed.app.listen({ host: composed.config.host, port: composed.config.port });
 }
 
 main().catch((error: unknown) => {

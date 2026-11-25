@@ -4,10 +4,12 @@ export { idr } from "./idr.ts";
 export type { Idr } from "./idr.ts";
 export { isPermissionAtom, permissionAtoms } from "./permissions.ts";
 export type { PermissionAtom } from "./permissions.ts";
+export { ptkpStatuses } from "./core-hr-payroll.port.ts";
 export type {
   CoreHrPayrollPort,
   EmployeePayrollProfileDTO,
   Pph21SubjectType,
+  PtkpStatus,
   TaxMethod,
 } from "./core-hr-payroll.port.ts";
 export type {
