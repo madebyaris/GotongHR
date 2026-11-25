@@ -62,8 +62,17 @@ describe("local object storage", () => {
     assert.equal(rejected.statusCode, 413);
     await assert.rejects(stat(path.join(root, "tenant/big.bin")));
 
+    const opened = storage.stat({ key: "tenant/a.txt" });
+    assert.equal((await opened)?.byteSize, Buffer.byteLength("hello"));
+    let streamed = "";
+    for await (const chunk of await storage.openRead({ key: "tenant/a.txt" })) {
+      streamed += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    }
+    assert.equal(streamed, "hello");
+
     await storage.delete({ key: "tenant/a.txt" });
     await assert.rejects(stat(path.join(root, "tenant/a.txt")));
+    assert.equal(await storage.stat({ key: "tenant/a.txt" }), null);
     await app.close();
   });
 

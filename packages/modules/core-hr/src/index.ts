@@ -1,4 +1,14 @@
 export type { CoreHrAuth } from "./auth.ts";
+export { hrDocuments } from "./documents/schema.ts";
+export { registerEmployeeDocuments } from "./documents/routes.ts";
+export type { EmployeeDocumentRouteDeps } from "./documents/routes.ts";
+export { EMPLOYEE_IMPORT_QUEUE } from "./imports/queue.ts";
+export type { EmployeeImportMessage } from "./imports/queue.ts";
+export { processEmployeeImport } from "./imports/process.ts";
+export type { ImportProcessResult } from "./imports/process.ts";
+export { hrImportJobs } from "./imports/schema.ts";
+export { registerEmployeeImports } from "./imports/routes.ts";
+export type { EmployeeImportRouteDeps } from "./imports/routes.ts";
 export { migrateCoreHr } from "./migrate.ts";
 export type { CoreHrMigrateInput } from "./migrate.ts";
 export { listEmployees, getEmployee } from "./read.ts";

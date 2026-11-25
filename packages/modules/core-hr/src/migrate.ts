@@ -1,5 +1,7 @@
 import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE, tenantIsolationPolicySql } from "@gotonghr/db";
 import pg from "pg";
+import { migrateHrDocuments } from "./documents/ddl.ts";
+import { migrateHrImportJobs } from "./imports/ddl.ts";
 
 const { Client } = pg;
 
@@ -26,6 +28,8 @@ export async function migrateCoreHr(input: CoreHrMigrateInput): Promise<void> {
         await migrator.query(tenantIsolationPolicySql(table));
         await grantAppDml(migrator, table);
       }
+      await migrateHrDocuments(migrator);
+      await migrateHrImportJobs(migrator);
       await migrator.query("COMMIT");
     } catch (error) {
       await migrator.query("ROLLBACK");
