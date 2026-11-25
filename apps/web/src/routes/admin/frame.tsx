@@ -7,7 +7,7 @@ const linkClass =
 export function AdminFrame({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const width = wide ? "max-w-5xl" : "max-w-xl";
   return (
-    <div className="min-h-svh bg-background text-foreground">
+    <div className="min-h-svh overflow-x-clip bg-background text-foreground">
       <header className="border-b border-border">
         <div
           className={`mx-auto flex w-full ${width} flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2`}

@@ -47,5 +47,6 @@ Each feature file starts with an H1 and one paragraph. Then it has these H2 sect
 - [Open the ESS bootstrap](./05-ess-bootstrap.md)
 - [Clock in offline and sync once](./06-ess-offline-clock.md)
 - [Review a flagged punch in the anomaly inbox](./07-anomaly-inbox.md)
+- [Find an employee and open the contract profile](./08-directory-and-contracts.md)
 
 `/admin/assistant` is outside this map. `verify.sh drive` still runs feature 03. Features 05 and 06 are driven by `apps/web/e2e/ess-offline.spec.ts`. `/admin/anomalies` is feature 07.

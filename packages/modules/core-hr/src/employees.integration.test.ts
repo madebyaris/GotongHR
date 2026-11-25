@@ -267,6 +267,113 @@ describe("employees and the PII vault", { concurrency: 1 }, () => {
     assert.equal(errorOf(denied).code, "pii_reveal_denied");
     assert.equal(await logCount(superuser, employee.id), 0);
   });
+
+  it("stores a department, a PKWT end date, and append-only pay", async () => {
+    const employee = dataOf<EmployeeJson>(
+      await postEmployee(app, companyA, ["employee.write"], body(companyA, "C001", "3273011508950007")),
+    );
+    const missingEnd = await app.inject({
+      method: "POST",
+      url: `/api/v1/employees/${employee.id}/contracts`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { contractType: "PKWT", startDate: "2026-01-01" },
+    });
+    assert.equal(missingEnd.statusCode, 400, missingEnd.body);
+    assert.equal(errorOf(missingEnd).fields?.[0]?.field, "endDate");
+
+    const department = dataOf<{ id: string; name: string }>(
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/departments",
+        headers: authHeaders(companyA, ["employee.write"]),
+        payload: {
+          legalEntityId: companyA.legalEntityId,
+          branchId: companyA.branchId,
+          name: "People Operations",
+          code: "PEOPLE",
+        },
+      }),
+    );
+    assert.equal(department.name, "People Operations");
+    const position = dataOf<{ id: string; title: string }>(
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/positions",
+        headers: authHeaders(companyA, ["employee.write"]),
+        payload: { departmentId: department.id, title: "HR Generalist", code: "HRG" },
+      }),
+    );
+    assert.equal(position.title, "HR Generalist");
+    const assigned = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/employees/${employee.id}`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { departmentId: department.id, positionId: position.id },
+    });
+    assert.equal(assigned.statusCode, 200, assigned.body);
+    const contract = await app.inject({
+      method: "POST",
+      url: `/api/v1/employees/${employee.id}/contracts`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { contractType: "PKWT", startDate: "2026-01-01", endDate: "2027-01-09" },
+    });
+    assert.equal(contract.statusCode, 201, contract.body);
+    const listed = dataOf<EmployeeJson[]>(
+      await app.inject({
+        method: "GET",
+        url: "/api/v1/employees?limit=100",
+        headers: authHeaders(companyA, ["employee.read"]),
+      }),
+    );
+    const row = listed.find((item) => item.employeeCode === "C001");
+    assert.equal(row?.departmentName, "People Operations");
+    assert.equal(row?.positionName, "HR Generalist");
+    assert.equal(row?.contractType, "PKWT");
+    assert.equal(row?.contractEndDate, "2027-01-09");
+    assert.equal(JSON.stringify(listed).includes("3273011508950007"), false);
+
+    const firstPay = await app.inject({
+      method: "POST",
+      url: `/api/v1/employees/${employee.id}/compensation-profiles`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { baseSalaryIdr: "8.500.000", effectiveFrom: "2026-01-01" },
+    });
+    assert.equal(firstPay.statusCode, 201, firstPay.body);
+    assert.equal(dataOf<{ baseSalaryIdr: string }>(firstPay).baseSalaryIdr, "8500000");
+    const duplicate = await app.inject({
+      method: "POST",
+      url: `/api/v1/employees/${employee.id}/compensation-profiles`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { baseSalaryIdr: "9000000", effectiveFrom: "2026-01-01" },
+    });
+    assert.equal(duplicate.statusCode, 400, duplicate.body);
+    const secondPay = await app.inject({
+      method: "POST",
+      url: `/api/v1/employees/${employee.id}/compensation-profiles`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { baseSalaryIdr: "9000000", effectiveFrom: "2026-06-01" },
+    });
+    assert.equal(secondPay.statusCode, 201, secondPay.body);
+    const history = dataOf<{ effectiveFrom: string; baseSalaryIdr: string }[]>(
+      await app.inject({
+        method: "GET",
+        url: `/api/v1/employees/${employee.id}/compensation-profiles`,
+        headers: authHeaders(companyA, ["employee.read"]),
+      }),
+    );
+    assert.deepEqual(
+      history.map((item) => item.effectiveFrom),
+      ["2026-01-01", "2026-06-01"],
+    );
+    const patchedPay = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/employees/${employee.id}/compensation-profiles`,
+      headers: authHeaders(companyA, ["employee.write"]),
+      payload: { baseSalaryIdr: "1", effectiveFrom: "2026-01-01" },
+    });
+    assert.equal(patchedPay.statusCode, 404, patchedPay.body);
+    await assert.rejects(platform.query("SELECT id FROM hr_contracts"), (error: unknown) => codeOf(error) === "42501");
+  });
 });
 
 interface EmployeeJson {
@@ -274,6 +381,10 @@ interface EmployeeJson {
   employeeCode: string;
   fullName: string;
   nikMask: string;
+  departmentName?: string | null;
+  positionName?: string | null;
+  contractType?: string | null;
+  contractEndDate?: string | null;
 }
 
 async function applySchemas(): Promise<void> {

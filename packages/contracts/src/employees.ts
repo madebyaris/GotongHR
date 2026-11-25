@@ -1,3 +1,4 @@
+import type { ContractType } from "./org-structure.ts";
 import type { FieldIssue } from "./envelope.ts";
 import type { ParseObjectResult, ParseResult } from "./org.ts";
 import { ptkpStatuses, type Pph21SubjectType, type PtkpStatus, type TaxMethod } from "./core-hr-payroll.port.ts";
@@ -86,6 +87,10 @@ export interface EmployeeRecord {
   branchId: string;
   departmentId: string | null;
   positionId: string | null;
+  departmentName: string | null;
+  positionName: string | null;
+  contractType: ContractType | null;
+  contractEndDate: string | null;
   employmentStatus: EmploymentStatus;
   joinDate: string;
   ptkpStatus: PtkpStatus;
