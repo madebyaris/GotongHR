@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { redactPii } from "./redact.ts";
+import { redactPii, scrubFreeTextPii } from "./redact.ts";
 
 test("redactPii replaces PII keys and keeps the other fields", () => {
   const redacted = redactPii({
@@ -68,6 +68,20 @@ test("redactPii redacts toJSON output and keeps dates and proto keys", () => {
   assert.equal(proto.nik, "[redacted]");
   assert.equal(Object.getPrototypeOf(kept), null);
   assert.equal(JSON.stringify(kept).includes("3273011508950001"), false);
+});
+
+test("scrubFreeTextPii removes raw NIK, NPWP, bank, phone, and email from strings", () => {
+  const scrubbed = scrubFreeTextPii({
+    note: "NIK 3175012345670001 NPWP 09.876.543.2-109.000 rekening 123456789012 +6281234567890 andi.hr@example.co.id",
+    city: "Jakarta",
+  }) as { note: string; city: string };
+  const encoded = JSON.stringify(scrubbed);
+  assert.equal(encoded.includes("3175012345670001"), false);
+  assert.equal(encoded.includes("09.876.543.2-109.000"), false);
+  assert.equal(encoded.includes("123456789012"), false);
+  assert.equal(encoded.includes("+6281234567890"), false);
+  assert.equal(encoded.includes("andi.hr@example.co.id"), false);
+  assert.equal(scrubbed.city, "Jakarta");
 });
 
 test("redactPii copies a shared object and still rejects a cycle", () => {

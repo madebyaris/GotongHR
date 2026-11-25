@@ -7,7 +7,7 @@ import {
   genesisHash,
 } from "./hash-chain.ts";
 import { hashChainEnabledForTenant } from "./keys.ts";
-import { redactPii } from "./redact.ts";
+import { redactPii, scrubFreeTextPii } from "./redact.ts";
 import { assertUuid, queryRows, quoteIdentifier } from "./sql.ts";
 import { assertSameTenant } from "./tenant.ts";
 
@@ -140,6 +140,7 @@ export interface AppendAuditEventInput {
  * Appends one `aud_events` row in the caller's transaction.
  * When the tenant has no key row, the event stays off-chain (`chain_seq` null).
  * `requireTenantKeys` keeps domain updates on the hash chain.
+ * Stored JSON drops PII keys and raw NIK, NPWP, bank, phone, and email text.
  */
 export async function appendAuditEvent(
   tx: TenantTx,
@@ -157,7 +158,7 @@ export async function appendAuditEvent(
   const actorRole = input.actorRole === null ? null : optionalText(input.actorRole, 80);
   const ipAddress = input.ipAddress === null ? null : optionalText(input.ipAddress, 64);
   const userAgent = input.userAgent === null ? null : optionalText(input.userAgent, 512);
-  const diff = asRecord(redactPii(input.diff));
+  const diff = asRecord(scrubFreeTextPii(input.diff));
 
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${`gotonghr.audit.append\n${tenantId}`}, 0))`,

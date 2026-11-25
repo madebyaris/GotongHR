@@ -23,6 +23,9 @@ await assertPostgresReachable();
 const standIns = ["hr_secret", "att_secret", "pay_run"] as const;
 
 const requiredTenantTables = [
+  "ai_action_proposals",
+  "ai_conversations",
+  "ai_messages",
   "att_secret",
   "aud_events",
   "aud_outbox_events",
@@ -41,6 +44,9 @@ const requiredTenantTables = [
 ] as const;
 
 const platformDeniedTables = [
+  "ai_action_proposals",
+  "ai_conversations",
+  "ai_messages",
   "hr_secret",
   "att_secret",
   "pay_run",
@@ -204,6 +210,9 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "ai_messages",
+      "ai_action_proposals",
+      "ai_conversations",
       "att_secret",
       "hr_secret",
       "pay_run",
@@ -355,7 +364,7 @@ async function scopedOrDenied(
   }
 }
 
-/** Runs identity, platform, and audit migrates without a package dependency from db. */
+/** Runs identity, platform, audit, and AI migrates without a package dependency from db. */
 async function applyTenantSchema(): Promise<void> {
   const script = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -498,6 +507,12 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const attB = randomUUID();
   const payA = randomUUID();
   const payB = randomUUID();
+  const conversationA = randomUUID();
+  const conversationB = randomUUID();
+  const messageA = randomUUID();
+  const messageB = randomUUID();
+  const proposalA = randomUUID();
+  const proposalB = randomUUID();
   const emailA = `${tenantA}@isolation.test`;
   const emailB = `${tenantB}@isolation.test`;
 
@@ -614,6 +629,27 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       `INSERT INTO pay_run (id, tenant_id, marker) VALUES ($1, $3, 'a'), ($2, $4, 'b')`,
       [payA, payB, tenantA, tenantB],
     );
+    await superuser.query(
+      `INSERT INTO ai_conversations (id, tenant_id, created_by_user_id, title) VALUES
+         ($1, $3, $5, 'a'),
+         ($2, $4, $6, 'b')`,
+      [conversationA, conversationB, tenantA, tenantB, userA, userB],
+    );
+    await superuser.query(
+      `INSERT INTO ai_messages (id, tenant_id, conversation_id, role, content_redacted) VALUES
+         ($1, $3, $5, 'user', 'a'),
+         ($2, $4, $6, 'user', 'b')`,
+      [messageA, messageB, tenantA, tenantB, conversationA, conversationB],
+    );
+    await superuser.query(
+      `INSERT INTO ai_action_proposals (
+         id, tenant_id, conversation_id, created_by_user_id, tool_name,
+         arguments_json, impact_preview_json, confirmation_nonce, expires_at
+       ) VALUES
+         ($1, $3, $5, $7, 'isolation', '{}'::jsonb, '{}'::jsonb, repeat('ab', 32), now() + interval '15 minutes'),
+         ($2, $4, $6, $8, 'isolation', '{}'::jsonb, '{}'::jsonb, repeat('cd', 32), now() + interval '15 minutes')`,
+      [proposalA, proposalB, tenantA, tenantB, conversationA, conversationB, userA, userB],
+    );
     await superuser.query("COMMIT");
   } catch (error) {
     await superuser.query("ROLLBACK");
@@ -631,6 +667,9 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
     sessionB,
     operatorId,
     ids: new Map([
+      ["ai_action_proposals", { a: proposalA, b: proposalB }],
+      ["ai_conversations", { a: conversationA, b: conversationB }],
+      ["ai_messages", { a: messageA, b: messageB }],
       ["att_secret", { a: attA, b: attB }],
       ["aud_events", { a: eventA, b: eventB }],
       ["aud_outbox_events", { a: outboxA, b: outboxB }],
@@ -652,6 +691,9 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
 
 async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   const tenants = [seed.tenantA, seed.tenantB];
+  await superuser.query("DELETE FROM ai_messages WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM ai_action_proposals WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM ai_conversations WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_pii_access_logs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_outbox_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
