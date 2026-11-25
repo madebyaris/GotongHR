@@ -252,6 +252,9 @@ importers:
 
   packages/modules/attendance:
     dependencies:
+      '@gotonghr/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@gotonghr/contracts':
         specifier: workspace:*
         version: link:../../contracts

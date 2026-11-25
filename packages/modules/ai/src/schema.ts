@@ -1,11 +1,18 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Drizzle shape of the AI tables. `migrate.ts` is the DDL that is applied.
- * Change both together. Knowledge tables wait for Slice 5.3.
+ * Change both together.
  * `confirmation_nonce` stores the SHA-256 hex of the secret, not the secret.
+ * `search_vector` is a generated tsvector. Keyword search does not use pgvector.
  */
+
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 function createdAt() {
   return timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -67,5 +74,29 @@ export const aiActionProposals = pgTable(
   (table) => [
     index("ai_action_proposals_tenant_status_idx").on(table.tenantId, table.status, table.expiresAt),
     index("ai_action_proposals_creator_idx").on(table.tenantId, table.createdByUserId),
+  ],
+);
+
+export const aiKnowledgeChunks = pgTable(
+  "ai_knowledge_chunks",
+  {
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    tenantId: uuid("tenant_id"),
+    sourceType: text("source_type").notNull(),
+    citationRef: text("citation_ref").notNull(),
+    title: text("title").notNull(),
+    content: text("content").notNull(),
+    isStatuteText: boolean("is_statute_text").notNull(),
+    documentId: uuid("document_id").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    searchVector: tsvector("search_vector").generatedAlwaysAs(
+      sql`to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '') || ' ' || coalesce(citation_ref, ''))`,
+    ),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("ai_knowledge_chunks_tenant_idx").on(table.tenantId),
+    index("ai_knowledge_chunks_search_idx").using("gin", table.searchVector),
   ],
 );
