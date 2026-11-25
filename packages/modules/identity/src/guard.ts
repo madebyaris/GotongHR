@@ -1,4 +1,5 @@
 import {
+  canWriteOrg,
   fail,
   isPrivilegedRole,
   permissionRequiresPrivilegedTotp,
@@ -46,14 +47,20 @@ export type AuthResult =
       meta?: { challenge: AuthChallenge };
     };
 
+interface AuthOptions {
+  permission?: PermissionAtom;
+  orgWrite?: boolean;
+}
+
 /**
- * Order: session, suspended tenant, tenant header, permission, then TOTP.
- * Scope flags are attached for later slices. This slice does not filter rows by them.
+ * Order: session, suspended tenant, tenant header, permission, org write, then TOTP.
+ * Scope flags are attached for later slices. Org routes filter rows by them.
+ * Company setup is not a payroll or PII route, so it does not ask for TOTP.
  * Support-grant writes pass `tenant.support_grant.write`, which requires TOTP.
  */
 export async function authenticateRequest(
   request: FastifyRequest,
-  options?: { permission?: PermissionAtom },
+  options?: AuthOptions,
 ): Promise<AuthResult> {
   const handle = request.server.gotongIdentity;
   if (!handle) throw new Error("Identity plugin is not registered.");
@@ -85,6 +92,9 @@ export async function authenticateRequest(
   const permission = options?.permission;
   if (permission && !selected.permissions.includes(permission)) {
     return denied(403, "forbidden", "Missing permission.");
+  }
+  if (options?.orgWrite && !canWriteOrg(selected.role)) {
+    return denied(403, "forbidden", "Only an owner or HR admin can change the company.");
   }
   const twoFactorEnabled = session.user.twoFactorEnabled === true;
   let sessionTotpVerified = false;
@@ -130,14 +140,24 @@ export async function authenticateRequest(
 }
 
 export function requireSession() {
-  return async function sessionGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    await sendAuthResult(request, reply, await authenticateRequest(request));
-  };
+  return requireAuth({});
 }
 
 export function requirePermission(atom: PermissionAtom) {
-  return async function permissionGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-    await sendAuthResult(request, reply, await authenticateRequest(request, { permission: atom }));
+  return requireAuth({ permission: atom });
+}
+
+export function requireMember() {
+  return requireAuth({});
+}
+
+export function requireOrgWriter() {
+  return requireAuth({ orgWrite: true });
+}
+
+function requireAuth(options: AuthOptions) {
+  return async function authGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await sendAuthResult(request, reply, await authenticateRequest(request, options));
   };
 }
 
@@ -234,7 +254,10 @@ function readSession(value: unknown): AuthSession | null {
   if (sessionId) session.id = sessionId;
   if (activeOrganizationId) session.activeOrganizationId = activeOrganizationId;
   return {
-    user: twoFactorEnabled === undefined ? { id: record.user.id } : { id: record.user.id, twoFactorEnabled },
+    user:
+      twoFactorEnabled === undefined
+        ? { id: record.user.id }
+        : { id: record.user.id, twoFactorEnabled },
     session,
   };
 }

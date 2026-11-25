@@ -13,6 +13,8 @@ const tenantTables = [
   "id_users",
   "id_memberships",
   "id_sessions",
+  "id_legal_entities",
+  "id_branches",
 ] as const;
 
 const appTables = [
@@ -277,9 +279,92 @@ CREATE TABLE IF NOT EXISTS id_rate_limits (
   expires_at timestamptz NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS id_legal_entities (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id uuid NOT NULL REFERENCES id_tenants (id) ON DELETE CASCADE,
+  company_name text NOT NULL,
+  npwp_16 text NOT NULL,
+  jkk_risk_class smallint,
+  bpjs_bu_code text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (id, tenant_id),
+  CONSTRAINT id_legal_entities_npwp_16_key UNIQUE (tenant_id, npwp_16),
+  CONSTRAINT id_legal_entities_company_name_check CHECK (
+    char_length(company_name) BETWEEN 1 AND 160
+    AND company_name = btrim(company_name)
+  ),
+  CONSTRAINT id_legal_entities_npwp_16_check CHECK (npwp_16 ~ '^[0-9]{16}$'),
+  CONSTRAINT id_legal_entities_jkk_risk_class_check CHECK (
+    jkk_risk_class IS NULL OR jkk_risk_class BETWEEN 1 AND 5
+  ),
+  CONSTRAINT id_legal_entities_bpjs_bu_code_check CHECK (
+    bpjs_bu_code IS NULL OR (
+      char_length(bpjs_bu_code) BETWEEN 1 AND 32
+      AND bpjs_bu_code ~ '^[A-Za-z0-9.-]+$'
+    )
+  )
+);
+
+CREATE TABLE IF NOT EXISTS id_branches (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id uuid NOT NULL REFERENCES id_tenants (id) ON DELETE CASCADE,
+  legal_entity_id uuid NOT NULL,
+  name text NOT NULL,
+  nitku_22 text NOT NULL,
+  timezone text NOT NULL,
+  ump_umk_idr bigint NOT NULL,
+  geofence_lat numeric(9, 6),
+  geofence_lng numeric(9, 6),
+  geofence_radius_m integer,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (id, tenant_id),
+  CONSTRAINT id_branches_nitku_22_key UNIQUE (tenant_id, nitku_22),
+  FOREIGN KEY (legal_entity_id, tenant_id)
+    REFERENCES id_legal_entities (id, tenant_id) ON DELETE CASCADE,
+  CONSTRAINT id_branches_name_check CHECK (
+    char_length(name) BETWEEN 1 AND 120
+    AND name = btrim(name)
+  ),
+  CONSTRAINT id_branches_nitku_22_check CHECK (nitku_22 ~ '^[0-9]{22}$'),
+  CONSTRAINT id_branches_timezone_check CHECK (
+    timezone IN ('Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura')
+  ),
+  CONSTRAINT id_branches_ump_check CHECK (ump_umk_idr >= 0),
+  CONSTRAINT id_branches_geofence_lat_check CHECK (
+    geofence_lat IS NULL OR (geofence_lat >= -90 AND geofence_lat <= 90)
+  ),
+  CONSTRAINT id_branches_geofence_lng_check CHECK (
+    geofence_lng IS NULL OR (geofence_lng >= -180 AND geofence_lng <= 180)
+  ),
+  CONSTRAINT id_branches_geofence_radius_check CHECK (
+    geofence_radius_m IS NULL OR (geofence_radius_m >= 1 AND geofence_radius_m <= 2000000000)
+  ),
+  CONSTRAINT id_branches_geofence_complete_check CHECK (
+    (
+      geofence_lat IS NULL
+      AND geofence_lng IS NULL
+      AND geofence_radius_m IS NULL
+    )
+    OR (
+      geofence_lat IS NOT NULL
+      AND geofence_lng IS NOT NULL
+      AND geofence_radius_m IS NOT NULL
+    )
+  )
+);
+CREATE INDEX IF NOT EXISTS id_branches_legal_entity_idx ON id_branches (legal_entity_id);
+
 COMMENT ON TABLE ba_user IS 'Better Auth credentials and TOTP. No RLS: sign-in runs before a tenant is known. platform_admin and gotong_queue have no privileges. Tenant rows live in id_* under FORCE RLS.';
 COMMENT ON TABLE id_rate_limits IS 'Login and password-reset counters. Not tenant data.';
 COMMENT ON TABLE id_tenants IS 'One row per Better Auth organization. Isolation predicate is id, not tenant_id.';
+COMMENT ON TABLE id_legal_entities IS 'Tenant PT/CV. npwp_16 is exactly 16 digits. FORCE RLS compares tenant_id to app.current_tenant_id.';
+COMMENT ON TABLE id_branches IS 'Branch NITKU, IANA timezone, UMP/UMK bigint rupiah, and geofence. FORCE RLS compares tenant_id to app.current_tenant_id.';
+COMMENT ON COLUMN id_branches.geofence_lat IS 'Geofence latitude. API field latitude.';
+COMMENT ON COLUMN id_branches.geofence_lng IS 'Geofence longitude. API field longitude.';
+COMMENT ON COLUMN id_branches.geofence_radius_m IS 'Geofence radius in meters. API field geofenceRadiusM.';
+COMMENT ON COLUMN id_branches.ump_umk_idr IS 'UMP or UMK floor in integer rupiah. API field umpUmkIdr, JSON string.';
 `;
 
 /**

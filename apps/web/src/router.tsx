@@ -10,6 +10,7 @@ import { lazy, Suspense } from "react";
 import { queryClient } from "./lib/query";
 
 const HomePage = lazy(() => import("./routes/home"));
+const SignInPage = lazy(() => import("./routes/sign-in"));
 const AdminPage = lazy(() => import("./routes/admin/index"));
 const EssPage = lazy(() => import("./routes/ess/index"));
 
@@ -31,6 +32,12 @@ const indexRoute = createRoute({
   component: HomePage,
 });
 
+const signInRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sign-in",
+  component: SignInPage,
+});
+
 const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin",
@@ -43,7 +50,7 @@ const essRoute = createRoute({
   component: EssPage,
 });
 
-const children: AnyRoute[] = [indexRoute, adminRoute, essRoute];
+const children: AnyRoute[] = [indexRoute, signInRoute, adminRoute, essRoute];
 
 if (
   import.meta.env.VITE_DEPLOYMENT_MODE === "multi_tenant_saas" ||

@@ -29,7 +29,14 @@ export {
 } from "./proxy-address.ts";
 export type { TrustProxySetting } from "./proxy-address.ts";
 export { SingleTenantOccupiedError } from "./errors.ts";
-export { authenticateRequest, requirePermission, requireSession, TENANT_HEADER } from "./guard.ts";
+export {
+  authenticateRequest,
+  requireMember,
+  requireOrgWriter,
+  requirePermission,
+  requireSession,
+  TENANT_HEADER,
+} from "./guard.ts";
 export type { AuthResult, GotongAuthContext } from "./guard.ts";
 export { migrateIdentity } from "./migrate.ts";
 export type { IdentityMigrateInput } from "./migrate.ts";
