@@ -165,6 +165,7 @@ async function resetEmployees(): Promise<void> {
          hr_contract_expiry_notices,
          hr_compensation_profiles,
          hr_contracts,
+         hr_documents,
          hr_employee_pii,
          hr_employees,
          hr_positions,

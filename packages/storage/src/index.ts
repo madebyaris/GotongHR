@@ -6,7 +6,7 @@ import { requiredText } from "./required.ts";
 export { createLocalStorage, type LocalObjectStorage, type LocalStorageOptions } from "./local.ts";
 export { createS3Storage, type S3ObjectStorage, type S3StorageOptions } from "./s3.ts";
 export { MAX_UPLOAD_BYTES } from "./types.ts";
-export type { ObjectStorage, PresignPutInput, PresignedGet, PresignedPut } from "./types.ts";
+export type { ObjectStat, ObjectStorage, PresignPutInput, PresignedGet, PresignedPut } from "./types.ts";
 
 const MIN_STORAGE_SECRET_LENGTH = 32;
 

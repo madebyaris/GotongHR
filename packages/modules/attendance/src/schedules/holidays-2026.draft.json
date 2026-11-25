@@ -1,0 +1,27 @@
+{
+  "status": "draft",
+  "calendar": "skb_3_menteri",
+  "year": 2026,
+  "note": "Draft dates for 2026. This is not the official SKB 3 Menteri. A human replaces this file after the decree is confirmed. Do not scrape a ministry site.",
+  "holidays": [
+    { "date": "2026-01-01", "name": "Tahun Baru Masehi", "kind": "national" },
+    { "date": "2026-01-16", "name": "Isra Miraj", "kind": "national" },
+    { "date": "2026-02-17", "name": "Tahun Baru Imlek", "kind": "national" },
+    { "date": "2026-03-18", "name": "Cuti Bersama Idul Fitri", "kind": "joint" },
+    { "date": "2026-03-19", "name": "Hari Suci Nyepi", "kind": "national" },
+    { "date": "2026-03-20", "name": "Hari Raya Idul Fitri", "kind": "national" },
+    { "date": "2026-03-21", "name": "Hari Raya Idul Fitri", "kind": "national" },
+    { "date": "2026-03-23", "name": "Cuti Bersama Idul Fitri", "kind": "joint" },
+    { "date": "2026-04-03", "name": "Wafat Yesus Kristus", "kind": "national" },
+    { "date": "2026-05-01", "name": "Hari Buruh Internasional", "kind": "national" },
+    { "date": "2026-05-14", "name": "Kenaikan Yesus Kristus", "kind": "national" },
+    { "date": "2026-05-27", "name": "Hari Raya Idul Adha", "kind": "national" },
+    { "date": "2026-05-31", "name": "Hari Raya Waisak", "kind": "national" },
+    { "date": "2026-06-01", "name": "Hari Lahir Pancasila", "kind": "national" },
+    { "date": "2026-06-16", "name": "Tahun Baru Islam", "kind": "national" },
+    { "date": "2026-08-17", "name": "Hari Kemerdekaan Republik Indonesia", "kind": "national" },
+    { "date": "2026-08-25", "name": "Maulid Nabi Muhammad SAW", "kind": "national" },
+    { "date": "2026-12-24", "name": "Cuti Bersama Natal", "kind": "joint" },
+    { "date": "2026-12-25", "name": "Hari Raya Natal", "kind": "national" }
+  ]
+}

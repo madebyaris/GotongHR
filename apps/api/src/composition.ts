@@ -1,6 +1,13 @@
+import { registerAttendanceRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
-import type { DomainActionExecutor } from "@gotonghr/contracts";
-import { registerContractExpiryJob, registerCoreHr, scanContractExpiry } from "@gotonghr/core-hr";
+import type { DomainActionExecutor, PermissionAtom } from "@gotonghr/contracts";
+import {
+  registerContractExpiryJob,
+  registerCoreHr,
+  registerEmployeeDocuments,
+  registerEmployeeImports,
+  scanContractExpiry,
+} from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -15,6 +22,8 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requireMember,
+  requireOrgWriter,
   requirePermission,
   type GotongAuth,
 } from "@gotonghr/identity";
@@ -32,7 +41,8 @@ import { readConfig, type AppConfig } from "./config.ts";
 import { platformReaders } from "./platform-auth.ts";
 import { buildServer } from "./server.ts";
 import { MAINTENANCE_QUEUE, startBoss } from "./queue.ts";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import { sendEmployeeImport, startEmployeeImportWorker } from "./employee-import.ts";
 
 export interface ComposedApp {
   app: FastifyInstance;
@@ -84,6 +94,25 @@ export async function composeFromEnv(
       },
     });
     const auth = createAuth({ appDb, env });
+    await startEmployeeImportWorker(runningBoss, { appDb, storage });
+    const guard = (permission: PermissionAtom) => requirePermission(permission);
+    const readAuth = (request: FastifyRequest) => {
+      const session = request.gotongAuth;
+      if (!session) return null;
+      const agent = request.headers["user-agent"];
+      return {
+        tenantId: session.tenantId,
+        userId: session.userId,
+        role: session.role,
+        permissions: session.permissions,
+        scopeEntityIds: session.scopeEntityIds,
+        scopeBranchIds: session.scopeBranchIds,
+        directReportsOnly: session.directReportsOnly,
+        selfOnly: session.selfOnly,
+        ipAddress: request.ip || null,
+        userAgent: typeof agent === "string" ? agent : null,
+      };
+    };
     await registerIdentity(app, { auth, appDb, env });
     await registerContractExpiryJob(boss, async (now) => {
       await scanContractExpiry({
@@ -92,22 +121,28 @@ export async function composeFromEnv(
         now,
       });
     });
-    await registerCoreHr(app, {
+    await registerCoreHr(app, { appDb, guard, readAuth });
+    await registerEmployeeDocuments(app, { appDb, storage, guard, readAuth });
+    await registerEmployeeImports(app, {
       appDb,
-      guard: (permission) => requirePermission(permission),
-      readAuth(request) {
-        const auth = request.gotongAuth;
-        if (!auth) return null;
+      storage,
+      guard,
+      readAuth,
+      enqueueEmployeeImport: (message) => sendEmployeeImport(runningBoss, message),
+    });
+    await registerAttendanceRoutes(app, {
+      appDb,
+      adminGuard: requireOrgWriter(),
+      memberGuard: requireMember(),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
         const agent = request.headers["user-agent"];
         return {
-          tenantId: auth.tenantId,
-          userId: auth.userId,
-          role: auth.role,
-          permissions: auth.permissions,
-          scopeEntityIds: auth.scopeEntityIds,
-          scopeBranchIds: auth.scopeBranchIds,
-          directReportsOnly: auth.directReportsOnly,
-          selfOnly: auth.selfOnly,
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
           ipAddress: request.ip || null,
           userAgent: typeof agent === "string" ? agent : null,
         };

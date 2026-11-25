@@ -38,7 +38,35 @@ export interface ThreadMessage {
 export interface ConversationThread {
   conversationId: string | null;
   messages: ThreadMessage[];
+  citations?: PolicyCitation[];
   proposals: AssistantProposal[];
+}
+
+export interface PolicyCitation {
+  citationRef: string;
+  notTheStatute: boolean;
+}
+
+export function policyCitations(result: unknown): PolicyCitation[] {
+  if (!result || typeof result !== "object") return [];
+  const matches = (result as { matches?: unknown }).matches;
+  if (!Array.isArray(matches)) return [];
+  const seen = new Set<string>();
+  const citations: PolicyCitation[] = [];
+  for (const match of matches) {
+    if (!match || typeof match !== "object") continue;
+    const row = match as { citation_ref?: unknown; not_the_statute?: unknown };
+    if (typeof row.citation_ref !== "string" || row.citation_ref.length === 0 || row.citation_ref.length > 160) {
+      continue;
+    }
+    if (seen.has(row.citation_ref)) continue;
+    seen.add(row.citation_ref);
+    citations.push({
+      citationRef: row.citation_ref,
+      notTheStatute: row.not_the_statute !== false,
+    });
+  }
+  return citations;
 }
 
 export type AssistantEvent =

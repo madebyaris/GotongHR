@@ -42,6 +42,15 @@ export interface SealedPii {
 export async function sealPii(tx: TenantTx, tenantId: string, plain: PlainPii): Promise<SealedPii> {
   await provisionTenantKeys(tx, tenantId);
   const secrets = await readTenantSecrets(tx, tenantId);
+  return sealPiiWithSecrets(secrets, tenantId, plain);
+}
+
+/** Same seal as `sealPii` when the caller already holds the tenant DEK. */
+export function sealPiiWithSecrets(
+  secrets: { dek: Buffer; pepper: Buffer },
+  tenantId: string,
+  plain: PlainPii,
+): SealedPii {
   const npwp = sealOptional(secrets.dek, tenantId, "npwp", plain.npwp, maskNpwp);
   const kk = sealOptional(secrets.dek, tenantId, "kk_number", plain.kkNumber, maskKkNumber);
   const kesehatan = sealOptional(
