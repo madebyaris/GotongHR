@@ -110,7 +110,6 @@ CREATE TABLE IF NOT EXISTS aud_events (
 );
 CREATE INDEX IF NOT EXISTS aud_events_tenant_created_idx
   ON aud_events (tenant_id, created_at, id);
-ALTER TABLE aud_events ADD COLUMN IF NOT EXISTS chain_seq bigint;
 CREATE UNIQUE INDEX IF NOT EXISTS aud_events_tenant_chain_seq_uidx
   ON aud_events (tenant_id, chain_seq)
   WHERE chain_seq IS NOT NULL;

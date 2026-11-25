@@ -306,22 +306,86 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
         actorUserId: actor,
         assignments: { label: "still" },
       });
-      const rows = queryRows<{ prev_hash: string | null; event_hash: string | null }>(
+      const rows = queryRows<{
+        prev_hash: string | null;
+        event_hash: string | null;
+        chain_seq: number | string | null;
+      }>(
         await tx.execute(sql`
-          SELECT prev_hash, event_hash FROM aud_events WHERE tenant_id = ${tenant}::uuid
+          SELECT prev_hash, event_hash, chain_seq
+          FROM aud_events
+          WHERE tenant_id = ${tenant}::uuid
         `),
       );
       assert.equal(rows.length, 1);
       assert.equal(rows[0]?.prev_hash, null);
       assert.equal(rows[0]?.event_hash, null);
+      assert.equal(rows[0]?.chain_seq, null);
       assert.deepEqual(await verifyTenantHashChain(tx, tenant), { ok: true, chained: false, events: 1 });
+    });
+  });
+
+  it("does not let an off-chain row break the chain after it is enabled", async () => {
+    const tenant = randomUUID();
+    const actor = randomUUID();
+    const off = { ...TEST_KEK, AUDIT_HASH_CHAIN: "off" };
+    const resourceId = await app.withTenantContext(tenant, async (tx) => {
+      await provisionTenantKeys(tx, tenant, off);
+      const inserted = queryRows<{ id: string }>(
+        await tx.execute(sql`
+          INSERT INTO aud_mutation_fixture (tenant_id, label, nik)
+          VALUES (${tenant}::uuid, 'plain', 'no-chain')
+          RETURNING id::text AS id
+        `),
+      );
+      const id = inserted[0]?.id;
+      assert.ok(id);
+      await auditedUpdate(tx, {
+        table: "aud_mutation_fixture",
+        tenantId: tenant,
+        resourceId: id,
+        action: "update",
+        resourceType: "aud_mutation_fixture",
+        actorUserId: actor,
+        assignments: { label: "still" },
+      });
+      return id;
+    });
+    await superuser.query(
+      "UPDATE aud_tenant_keys SET hash_chain_enabled = true WHERE tenant_id = $1::uuid",
+      [tenant],
+    );
+    await app.withTenantContext(tenant, async (tx) => {
+      await auditedUpdate(tx, {
+        table: "aud_mutation_fixture",
+        tenantId: tenant,
+        resourceId,
+        action: "update",
+        resourceType: "aud_mutation_fixture",
+        actorUserId: actor,
+        assignments: { label: "on" },
+      });
+      const rows = queryRows<{ chain_seq: number | string | null; event_hash: string | null }>(
+        await tx.execute(sql`
+          SELECT chain_seq, event_hash
+          FROM aud_events
+          WHERE tenant_id = ${tenant}::uuid
+          ORDER BY aud_events.chain_seq ASC NULLS LAST, aud_events.created_at ASC, aud_events.id ASC
+        `),
+      );
+      assert.equal(rows.length, 2);
+      assert.equal(Number(rows[0]?.chain_seq), 1);
+      assert.equal(typeof rows[0]?.event_hash, "string");
+      assert.equal(rows[1]?.chain_seq, null);
+      assert.equal(rows[1]?.event_hash, null);
+      assert.deepEqual(await verifyTenantHashChain(tx, tenant), { ok: true, chained: true, events: 1 });
     });
   });
 
   it("refuses an audit write before tenant keys exist", async () => {
     const tenant = randomUUID();
     const actor = randomUUID();
-    await app.withTenantContext(tenant, async (tx) => {
+    const resourceId = await app.withTenantContext(tenant, async (tx) => {
       const inserted = queryRows<{ id: string }>(
         await tx.execute(sql`
           INSERT INTO aud_mutation_fixture (tenant_id, label, nik)
@@ -329,10 +393,13 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
           RETURNING id::text AS id
         `),
       );
-      const resourceId = inserted[0]?.id;
-      assert.ok(resourceId);
-      await assert.rejects(
-        () =>
+      const id = inserted[0]?.id;
+      assert.ok(id);
+      return id;
+    });
+    await assert.rejects(
+      () =>
+        app.withTenantContext(tenant, (tx) =>
           auditedUpdate(tx, {
             table: "aud_mutation_fixture",
             tenantId: tenant,
@@ -342,10 +409,18 @@ describe("audit, outbox, and PII crypto", { concurrency: 1 }, () => {
             actorUserId: actor,
             assignments: { label: "later" },
           }),
-        /not provisioned/,
-      );
-      assert.equal(await countOf(tx, "aud_events"), 0);
-    });
+        ),
+      /not provisioned/,
+    );
+    const kept = await superuser.query<{ label: string; n: number }>(
+      `SELECT fixture.label,
+              (SELECT count(*)::int FROM aud_events WHERE tenant_id = $1) AS n
+       FROM aud_mutation_fixture AS fixture
+       WHERE fixture.id = $2::uuid`,
+      [tenant, resourceId],
+    );
+    assert.equal(kept.rows[0]?.label, "early");
+    assert.equal(kept.rows[0]?.n, 0);
   });
 
   it("lets the queue role update only the publish columns", async () => {

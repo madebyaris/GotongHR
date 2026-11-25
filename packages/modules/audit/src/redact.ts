@@ -40,6 +40,7 @@ export function isPiiKey(key: string): boolean {
  * Replaces PII field values with `[redacted]`, including nested objects.
  * `toJSON` runs first, then the result is redacted, so a method cannot hide plaintext.
  * Dates become ISO strings. Functions are dropped. `__proto__` stays an own key.
+ * A shared object is visited again at each use. A cycle still throws.
  */
 export function redactPii(value: unknown): unknown {
   return redactNormalized(normalizeJsonValue(value, new WeakSet()));
@@ -51,23 +52,27 @@ function normalizeJsonValue(value: unknown, seen: WeakSet<object>): unknown {
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) throw new Error("audit value cannot include a cycle");
   seen.add(value);
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  try {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    }
+    const toJson = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJson === "function") {
+      return normalizeJsonValue(toJson.call(value), seen);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeJsonValue(item, seen));
+    }
+    const out = Object.create(null) as Record<string, unknown>;
+    for (const key of ownKeys(value)) {
+      const child = (value as Record<string, unknown>)[key];
+      if (typeof child === "function") continue;
+      defineOwn(out, key, normalizeJsonValue(child, seen));
+    }
+    return out;
+  } finally {
+    seen.delete(value);
   }
-  const toJson = (value as { toJSON?: unknown }).toJSON;
-  if (typeof toJson === "function") {
-    return normalizeJsonValue(toJson.call(value), seen);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeJsonValue(item, seen));
-  }
-  const out = Object.create(null) as Record<string, unknown>;
-  for (const key of ownKeys(value)) {
-    const child = (value as Record<string, unknown>)[key];
-    if (typeof child === "function") continue;
-    defineOwn(out, key, normalizeJsonValue(child, seen));
-  }
-  return out;
 }
 
 function redactNormalized(value: unknown): unknown {

@@ -70,5 +70,21 @@ export async function verifyTenantHashChain(
     eventHash: row.event_hash,
     chainSeq: row.chain_seq === null ? null : Number(row.chain_seq),
   }));
-  return verifyChain(tenant, events);
+  return verifyStoredEvents(tenant, events);
+}
+
+/**
+ * Off-chain rows keep `chain_seq` null and are not links.
+ * A chain that starts after those rows still verifies.
+ * A row that has a hash without a sequence, or a sequence without a hash, fails.
+ */
+function verifyStoredEvents(tenantId: string, events: StoredAuditEvent[]): ChainVerification {
+  const linked = events.filter((event) => event.chainSeq !== null);
+  if (linked.length === 0) return verifyChain(tenantId, events);
+  for (const event of events) {
+    const hashed = event.eventHash !== null || event.prevHash !== null;
+    if (event.chainSeq === null && hashed) return { ok: false, eventId: event.id };
+    if (event.chainSeq !== null && event.eventHash === null) return { ok: false, eventId: event.id };
+  }
+  return verifyChain(tenantId, linked);
 }

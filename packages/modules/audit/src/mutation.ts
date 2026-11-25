@@ -49,6 +49,8 @@ interface HashRow {
  * PostgreSQL 18 returns OLD and NEW from that UPDATE. PII keys are redacted
  * before the JSON is stored. The returned snapshots are redacted too.
  * The hash chain runs when the tenant key row says it is on.
+ * `chain_seq` stays null when the chain is off, so a later enable does not
+ * treat that row as the previous hash.
  */
 export async function auditedUpdate(
   tx: TenantTx,
@@ -80,6 +82,7 @@ export async function auditedUpdate(
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${`gotonghr.audit.append\n${tenantId}`}, 0))`,
   );
+  const chain = await hashChainEnabledForTenant(tx, tenantId);
 
   const updated = queryRows<{ before_json: unknown; after_json: unknown }>(
     await tx.execute(sql`
@@ -101,12 +104,12 @@ export async function auditedUpdate(
   const after = asRecord(redactPii(asRecord(row.after_json)));
   const diff = { before, after };
 
-  const chain = await hashChainEnabledForTenant(tx, tenantId);
   let prevHash: string | null = null;
   let eventHashValue: string | null = null;
+  let chainSeq: number | null = null;
   const stamp = await nextStamp(tx);
-  const chainSeq = await nextChainSeq(tx, tenantId);
   if (chain) {
+    chainSeq = await nextChainSeq(tx, tenantId);
     prevHash = await previousHash(tx, tenantId);
     eventHashValue = eventHash({
       id: stamp.id,
@@ -192,6 +195,7 @@ async function nextChainSeq(tx: TenantTx, tenantId: string): Promise<number> {
   return chainSeq;
 }
 
+/** Newest hashed event. Rows with `chain_seq` null are off-chain and are skipped. */
 async function previousHash(tx: TenantTx, tenantId: string): Promise<string> {
   const rows = queryRows<HashRow>(
     await tx.execute(sql`

@@ -69,3 +69,20 @@ test("redactPii redacts toJSON output and keeps dates and proto keys", () => {
   assert.equal(Object.getPrototypeOf(kept), null);
   assert.equal(JSON.stringify(kept).includes("3273011508950001"), false);
 });
+
+test("redactPii copies a shared object and still rejects a cycle", () => {
+  const shared = { city: "Jakarta", nik: "3273011508950001" };
+  const redacted = redactPii({ left: shared, right: shared }) as {
+    left: { city: string; nik: string };
+    right: { city: string; nik: string };
+  };
+  assert.equal(redacted.left.city, "Jakarta");
+  assert.equal(redacted.right.city, "Jakarta");
+  assert.equal(redacted.left.nik, "[redacted]");
+  assert.equal(redacted.right.nik, "[redacted]");
+  assert.equal(JSON.stringify(redacted).includes("3273011508950001"), false);
+
+  const cycle: { label: string; self?: unknown } = { label: "loop" };
+  cycle.self = cycle;
+  assert.throws(() => redactPii(cycle), /cycle/);
+});
