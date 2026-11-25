@@ -28,6 +28,7 @@ const requiredTenantTables = [
   "ai_knowledge_chunks",
   "ai_messages",
   "att_approval_delegations",
+  "att_clock_events",
   "att_daily_summaries",
   "att_holidays",
   "att_leave_balances",
@@ -63,6 +64,7 @@ const platformDeniedTables = [
   "ai_knowledge_chunks",
   "ai_messages",
   "att_approval_delegations",
+  "att_clock_events",
   "att_daily_summaries",
   "att_holidays",
   "att_leave_balances",
@@ -249,6 +251,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "att_clock_events",
       "att_rosters",
       "att_leave_requests",
       "att_leave_balances",
@@ -524,7 +527,7 @@ async function scopedOrDenied(
   }
 }
 
-/** Runs identity, platform, audit, and AI migrates without a package dependency from db. */
+/** Runs identity, platform, audit, core-hr, clock, and AI migrates without a package dependency from db. */
 async function applyTenantSchema(): Promise<void> {
   const script = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -681,6 +684,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const messageB = randomUUID();
   const proposalA = randomUUID();
   const proposalB = randomUUID();
+  const clockA = randomUUID();
+  const clockB = randomUUID();
+  const clockKeyA = randomUUID();
+  const clockKeyB = randomUUID();
   const chunkA = randomUUID();
   const chunkB = randomUUID();
   const sopDocA = randomUUID();
@@ -817,6 +824,16 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
          ($1, $3, 'A001', 'Employee A', $5, $7, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent'),
          ($2, $4, 'B001', 'Employee B', $6, $8, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent')`,
       [employeeA, employeeB, tenantA, tenantB, entityA, entityB, branchA, branchB],
+    );
+    await superuser.query(
+      `INSERT INTO att_clock_events (
+         id, tenant_id, employee_id, branch_id, idempotency_key,
+         punch_type, captured_at, received_at, clock_drift_seconds,
+         sync_source, lat, lng, geofence_ok, review_status
+       ) VALUES
+         ($1, $3, $5, $7, $9, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok'),
+         ($2, $4, $6, $8, $10, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok')`,
+      [clockA, clockB, tenantA, tenantB, employeeA, employeeB, branchA, branchB, clockKeyA, clockKeyB],
     );
     await superuser.query(
       `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask) VALUES
@@ -1017,6 +1034,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["ai_knowledge_chunks", { a: chunkA, b: chunkB }],
       ["ai_messages", { a: messageA, b: messageB }],
       ["att_approval_delegations", { a: delegationA, b: delegationB }],
+      ["att_clock_events", { a: clockA, b: clockB }],
       ["att_daily_summaries", { a: summaryA, b: summaryB }],
       ["att_holidays", { a: holidayA, b: holidayB }],
       ["att_leave_balances", { a: leaveBalanceA, b: leaveBalanceB }],
@@ -1070,6 +1088,7 @@ async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   await superuser.query("DELETE FROM sys_platform_audit_events WHERE target_tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM sys_support_grants WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_clock_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_documents WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_import_jobs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_employee_pii WHERE tenant_id = ANY($1::uuid[])", [tenants]);

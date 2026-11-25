@@ -1,5 +1,5 @@
 import { migrateAi } from "@gotonghr/ai";
-import { migrateAttendance } from "@gotonghr/attendance";
+import { migrateAttendance, migrateClock } from "@gotonghr/attendance";
 import { migrateAudit } from "@gotonghr/audit";
 import { migrateCoreHr } from "@gotonghr/core-hr";
 import { migrate, migrateEnvFrom } from "@gotonghr/db";
@@ -21,6 +21,7 @@ export async function applyTenantSchema(env: NodeJS.ProcessEnv = process.env): P
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
   await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAttendance({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateClock({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAi({
     migratorUrl: migrateEnv.migratorUrl,
     superuserUrl: migrateEnv.superuserUrl,
