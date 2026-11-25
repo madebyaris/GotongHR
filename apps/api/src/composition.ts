@@ -1,3 +1,4 @@
+import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -74,6 +75,7 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
     await registerPlatform(app, {
       platform: platformDb,
       app: appDb,
+      tenantAudit: createSupportGrantAuditPort(appDb),
       mountPlatformRoutes: platformApiMounted(config.deploymentMode),
       inviteSecret: readAuthSecret(env),
       hashOwnerPassword: hashPassword,

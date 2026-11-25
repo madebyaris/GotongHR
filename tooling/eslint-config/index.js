@@ -143,6 +143,15 @@ export default tseslint.config(
     },
   },
   {
+    files: [
+      "packages/modules/platform/src/isolation.integration.test.ts",
+      "packages/modules/platform/src/isolation-schema.ts",
+    ],
+    rules: {
+      "no-restricted-imports": "off",
+    },
+  },
+  {
     files: ["packages/payroll-engine/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": purePackageImportRule("packages/payroll-engine", {

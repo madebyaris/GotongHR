@@ -2,6 +2,7 @@ export {
   createTenantDatabase,
   withTenantContext,
 } from "./client.ts";
+export { assertPostgresReachable } from "./require-database.ts";
 export type { AppDatabase, TenantDatabase, TenantTx } from "./client.ts";
 export { applyDatabaseUrls, assertProductionSecret, loadRepoEnv, requiredEnv } from "./env.ts";
 export {

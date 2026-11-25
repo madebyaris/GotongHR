@@ -1,12 +1,15 @@
 import type { PiiField } from "@gotonghr/crypto";
 import { decryptField } from "@gotonghr/crypto/decrypt";
 import { isPiiField } from "@gotonghr/crypto";
+import { supportPiiRevealDeny, supportPiiRevealSetting } from "@gotonghr/contracts";
 import type { TenantTx } from "@gotonghr/db";
 import { sql } from "drizzle-orm";
-import { PiiRevealDeniedError, PiiRevealReasonError } from "./errors.ts";
+import { PiiRevealDeniedError, PiiRevealReasonError, SupportGrantPiiDeniedError } from "./errors.ts";
 import { readTenantSecrets } from "./keys.ts";
 import { assertUuid, queryRows } from "./sql.ts";
 import { assertSameTenant } from "./tenant.ts";
+
+export { SupportGrantPiiDeniedError } from "./errors.ts";
 
 declare const revealedBrand: unique symbol;
 declare const ciphertextBrand: unique symbol;
@@ -22,6 +25,12 @@ export interface RevealCaller {
   userId: string;
   permissions: readonly string[];
   ipAddress?: string;
+  /**
+   * Set when the caller is a support-grant session.
+   * `false` refuses the reveal before any `aud_pii_access_logs` insert.
+   * The session wrapper also sets `app.support_pii_reveal` to `deny`.
+   */
+  supportGrantAllowPiiReveal?: boolean;
 }
 
 export interface RevealRequest {
@@ -52,6 +61,9 @@ export async function revealPii(
   request: RevealRequest,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<RevealedPii> {
+  if (await supportGrantDeniesReveal(tx, caller.supportGrantAllowPiiReveal)) {
+    throw new SupportGrantPiiDeniedError();
+  }
   if (!caller.permissions.includes(REVEAL_PERMISSION)) {
     throw new PiiRevealDeniedError();
   }
@@ -90,4 +102,22 @@ export async function revealPii(
   );
   if (!inserted[0]?.id) throw new Error("PII access log insert failed");
   return plaintext as RevealedPii;
+}
+
+/**
+ * A live support grant with `allow_pii_reveal = false` sets the transaction GUC
+ * to `deny`. The caller flag covers a session that passes the flag directly.
+ * Either one refuses before decrypt and before the access log insert.
+ */
+async function supportGrantDeniesReveal(
+  tx: TenantTx,
+  supportGrantAllowPiiReveal: boolean | undefined,
+): Promise<boolean> {
+  if (supportGrantAllowPiiReveal === false) return true;
+  const rows = queryRows<{ gate: string | null }>(
+    await tx.execute(
+      sql`SELECT current_setting(${supportPiiRevealSetting}, true) AS gate`,
+    ),
+  );
+  return rows[0]?.gate === supportPiiRevealDeny;
 }

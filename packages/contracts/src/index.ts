@@ -55,3 +55,8 @@ export type {
   AttendancePayrollPort,
   AttendancePeriodSummaryDTO,
 } from "./attendance-payroll.port.ts";
+export { supportPiiRevealDeny, supportPiiRevealSetting } from "./support-grant-audit.port.ts";
+export type {
+  SupportGrantAuditPort,
+  SupportGrantTenantEvent,
+} from "./support-grant-audit.port.ts";
