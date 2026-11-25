@@ -17,6 +17,12 @@ export {
   readTrustedOrigins,
 } from "./env.ts";
 export type { BootstrapInput, DeploymentMode } from "./env.ts";
+export {
+  isPrivateProxyAddress,
+  isTrustedProxyPeer,
+  trustProxyFunction,
+} from "./proxy-address.ts";
+export type { TrustProxySetting } from "./proxy-address.ts";
 export { SingleTenantOccupiedError } from "./errors.ts";
 export { requirePermission, TENANT_HEADER } from "./guard.ts";
 export type { GotongAuthContext } from "./guard.ts";

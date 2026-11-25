@@ -1,4 +1,5 @@
 import { fail, ok } from "@gotonghr/contracts";
+import type { TrustProxySetting } from "@gotonghr/identity";
 import type { LocalObjectStorage, S3ObjectStorage } from "@gotonghr/storage";
 import Fastify, { type FastifyInstance } from "fastify";
 import {
@@ -20,7 +21,7 @@ export interface ServerDeps {
   storage?: LocalObjectStorage | S3ObjectStorage;
   logger?: boolean;
   /** Fastify trustProxy. A number is a hop count from a private peer. Default 1. */
-  trustProxy?: boolean | number | string | string[];
+  trustProxy?: TrustProxySetting;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {

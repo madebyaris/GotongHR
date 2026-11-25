@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import fastifyBetterAuth from "fastify-better-auth";
 import type { GotongAuth } from "./auth.ts";
 import type { GotongAuthContext } from "./guard.ts";
-import { readAuthRateLimit, readTrustCloudflare } from "./env.ts";
+import { readAuthRateLimit, readTrustCloudflare, readTrustProxy } from "./env.ts";
 import { createPostgresRateLimitStore, isCredentialRoute, rateLimitKey } from "./rate-limit.ts";
 
 export interface IdentityHandle {
@@ -37,6 +37,7 @@ export async function registerIdentity(
   const env = options.env ?? process.env;
   const configured = readAuthRateLimit(env);
   const trustCloudflare = readTrustCloudflare(env);
+  const trustProxy = readTrustProxy(env);
   const max = options.rateLimitMax ?? configured.max;
   const windowMs = options.rateLimitWindowMs ?? configured.windowMs;
   app.decorate("gotongIdentity", { auth: options.auth, appDb: options.appDb });
@@ -59,11 +60,16 @@ export async function registerIdentity(
       max,
       timeWindow: windowMs,
       store: createPostgresRateLimitStore(options.appDb.pool),
-      keyGenerator: (request) => rateLimitKey(request, trustCloudflare),
+      keyGenerator: (request) => rateLimitKey(request, trustCloudflare, trustProxy),
       allowList: (request) => !isCredentialRoute(request.url),
       errorResponseBuilder: (_request, context) =>
         Object.assign(new Error("Too many attempts."), { statusCode: context.statusCode }),
     });
+    if (env.NODE_ENV === "test") {
+      scope.get("/api/auth/__test/fail", async () => {
+        throw Object.assign(new Error("database password=secret"), { statusCode: 500 });
+      });
+    }
     await scope.register(fastifyBetterAuth, { auth: options.auth });
   });
 }

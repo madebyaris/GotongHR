@@ -283,31 +283,55 @@ COMMENT ON TABLE id_tenants IS 'One row per Better Auth organization. Isolation 
 `;
 
 /**
- * Existing databases created before these foreign keys need the constraints
- * added, and orphan rows would reject the ADD. The superuser bypasses FORCE
- * RLS, so it can see every tenant row. The trigger deletes id_sessions as the
- * superuser: a direct ba_session delete from app_tenant would otherwise be
- * blocked by FORCE RLS on the cascade.
+ * Fresh databases get the foreign keys from CREATE TABLE. Databases created
+ * before those keys existed get them here. Orphan rows are not deleted: the
+ * operator has to remove them, then rerun migrations.
+ *
+ * The ON DELETE CASCADE on id_sessions.auth_session_id is enough. On
+ * PostgreSQL 18.7, with FORCE RLS on id_sessions and no BYPASSRLS, dropping
+ * ba_session_delete_id_sessions and then `SET ROLE app_tenant; DELETE FROM
+ * ba_session` removed the child row and did not raise. The same delete
+ * succeeded as gotong_migrator, the table owner, who also has no BYPASSRLS.
+ * Referential actions are not filtered by the tenant policy, so the
+ * security-definer trigger is dropped instead of kept.
  */
 const superuserRepairSql = `
-DELETE FROM id_sessions AS s
-WHERE NOT EXISTS (SELECT 1 FROM ba_session AS b WHERE b.id = s.auth_session_id);
-
-DELETE FROM id_tenants AS t
-WHERE NOT EXISTS (SELECT 1 FROM ba_organization AS o WHERE o.id = t.organization_id);
-
 DO $$
+DECLARE
+  orphan_tenants bigint;
+  orphan_sessions bigint;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'id_tenants_organization_id_fkey'
   ) THEN
+    SELECT count(*) INTO orphan_tenants
+    FROM id_tenants AS t
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ba_organization AS o WHERE o.id = t.organization_id
+    );
+    IF orphan_tenants > 0 THEN
+      RAISE EXCEPTION
+        'id_tenants has % row(s) whose organization_id is not in ba_organization. Delete those rows, then rerun migrations. Example: DELETE FROM id_tenants AS t WHERE NOT EXISTS (SELECT 1 FROM ba_organization AS o WHERE o.id = t.organization_id);',
+        orphan_tenants;
+    END IF;
     ALTER TABLE id_tenants
       ADD CONSTRAINT id_tenants_organization_id_fkey
       FOREIGN KEY (organization_id) REFERENCES ba_organization (id) ON DELETE RESTRICT;
   END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'id_sessions_auth_session_id_fkey'
   ) THEN
+    SELECT count(*) INTO orphan_sessions
+    FROM id_sessions AS s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ba_session AS b WHERE b.id = s.auth_session_id
+    );
+    IF orphan_sessions > 0 THEN
+      RAISE EXCEPTION
+        'id_sessions has % row(s) whose auth_session_id is not in ba_session. Delete those rows, then rerun migrations. Example: DELETE FROM id_sessions AS s WHERE NOT EXISTS (SELECT 1 FROM ba_session AS b WHERE b.id = s.auth_session_id);',
+        orphan_sessions;
+    END IF;
     ALTER TABLE id_sessions
       ADD CONSTRAINT id_sessions_auth_session_id_fkey
       FOREIGN KEY (auth_session_id) REFERENCES ba_session (id) ON DELETE CASCADE;
@@ -316,28 +340,6 @@ END $$;
 
 DROP TRIGGER IF EXISTS ba_session_delete_id_sessions ON ba_session;
 DROP FUNCTION IF EXISTS id_delete_sessions_for_auth_session();
-
-CREATE FUNCTION id_delete_sessions_for_auth_session()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-  DELETE FROM id_sessions WHERE auth_session_id = OLD.id;
-  RETURN OLD;
-END;
-$$;
-
-CREATE TRIGGER ba_session_delete_id_sessions
-  BEFORE DELETE ON ba_session
-  FOR EACH ROW
-  EXECUTE FUNCTION id_delete_sessions_for_auth_session();
-
-REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM PUBLIC;
-REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM ${PLATFORM_ROLE};
-REVOKE ALL ON FUNCTION id_delete_sessions_for_auth_session() FROM ${QUEUE_ROLE};
-GRANT EXECUTE ON FUNCTION id_delete_sessions_for_auth_session() TO ${APP_ROLE};
 `;
 
 const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [

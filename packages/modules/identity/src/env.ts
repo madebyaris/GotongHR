@@ -1,4 +1,5 @@
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password.ts";
+import { assertTrustedProxyAllowlist, type TrustProxySetting } from "./proxy-address.ts";
 
 const deploymentModes = ["single_tenant", "multi_tenant_saas", "holding_multi_tenant"] as const;
 
@@ -73,16 +74,21 @@ export function readTrustedOrigins(env: NodeJS.ProcessEnv): string[] {
 }
 
 /**
- * Fastify `trustProxy` input. Defaults to one hop (Caddy or a single tunnel).
- * The API turns a number into a trust function that accepts that many hops
- * only from a loopback or private peer. Fastify 5.12 itself ignores a bare
- * hop count. `true` / `false` are booleans. Anything else is an address or a
- * comma-separated address list (`loopback` is valid).
+ * Fastify `trustProxy` input. An empty value uses one hop. A number is a hop
+ * count from a loopback or private peer, which is safe only when port 3000 is
+ * not reachable from untrusted clients. `false` trusts nothing. Anything else
+ * is an address, a CIDR, or `loopback` / `linklocal` / `uniquelocal`.
+ * `true` is rejected because it would trust every client.
  */
-export function readTrustProxy(env: NodeJS.ProcessEnv): boolean | number | string | string[] {
-  const raw = (env.GOTONG_TRUST_PROXY ?? "1").trim();
-  if (raw === "true") return true;
-  if (raw === "false") return false;
+export function readTrustProxy(env: NodeJS.ProcessEnv): TrustProxySetting {
+  const raw = env.GOTONG_TRUST_PROXY?.trim() || "1";
+  const lowered = raw.toLowerCase();
+  if (lowered === "true") {
+    throw new Error(
+      "GOTONG_TRUST_PROXY=true trusts every peer. Set a hop count (for example 1), false, or an explicit trusted-proxy address or CIDR list.",
+    );
+  }
+  if (lowered === "false") return false;
   if (/^\d+$/u.test(raw)) {
     const hops = Number(raw);
     if (hops > 32) throw new Error("GOTONG_TRUST_PROXY is invalid.");
@@ -94,10 +100,14 @@ export function readTrustProxy(env: NodeJS.ProcessEnv): boolean | number | strin
     .filter((part) => part.length > 0);
   const first = parts[0];
   if (!first) throw new Error("GOTONG_TRUST_PROXY is invalid.");
+  assertTrustedProxyAllowlist(parts);
   return parts.length === 1 ? first : parts;
 }
 
-/** CF-Connecting-IP is used only when the origin is reachable solely through Cloudflare. */
+/**
+ * CF-Connecting-IP is read only when this is true. The origin must be reachable
+ * solely through Cloudflare Tunnel or zone-specific Authenticated Origin Pulls.
+ */
 export function readTrustCloudflare(env: NodeJS.ProcessEnv): boolean {
   const raw = (env.GOTONG_TRUST_CLOUDFLARE ?? "false").trim().toLowerCase();
   if (raw === "true" || raw === "1") return true;

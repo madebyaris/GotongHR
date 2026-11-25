@@ -170,6 +170,11 @@ async function connectOutsidePool(appDb: TenantDatabase): Promise<pg.Client> {
     throw new Error("database url is missing");
   }
   const client = new pg.Client({ connectionString });
+  client.on("error", (error: Error) => {
+    process.stderr.write(
+      `${JSON.stringify({ msg: "bootstrap lock client error", error: error.message })}\n`,
+    );
+  });
   await client.connect();
   return client;
 }

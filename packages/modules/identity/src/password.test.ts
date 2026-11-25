@@ -5,6 +5,7 @@ import {
   argon2ConcurrencyLimit,
   argon2InFlight,
   argon2Parameters,
+  argon2QueueLimit,
   hashPassword,
   isMalformedArgon2Hash,
   verifyPassword,
@@ -25,7 +26,7 @@ describe("argon2", { concurrency: 1 }, () => {
     let peakRss = rssBefore;
     let finished = 0;
     const pending = Array.from({ length: 4 }, (_, index) =>
-      hashPassword(`concurrent-password-${index}-ok`).then(() => {
+      hashPassword(`concurrent-password-${index}-ok`).finally(() => {
         finished += 1;
       }),
     );
@@ -83,6 +84,34 @@ describe("argon2", { concurrency: 1 }, () => {
       ),
     );
     assert.equal(peak, argon2ConcurrencyLimit);
+    assert.equal(argon2InFlight(), 0);
+  });
+
+  it("rejects when the waiter queue is full", async () => {
+    const release: Array<() => void> = [];
+    const holders = [0, 1].map(() =>
+      withArgon2Slot(
+        () =>
+          new Promise<void>((resolve) => {
+            release.push(resolve);
+          }),
+      ),
+    );
+    while (argon2InFlight() < argon2ConcurrencyLimit) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const waiting = Array.from({ length: argon2QueueLimit }, () =>
+      withArgon2Slot(async () => undefined),
+    );
+    await assert.rejects(withArgon2Slot(async () => undefined), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal("statusCode" in error ? error.statusCode : undefined, 503);
+      assert.match(error.message, /overloaded/);
+      return true;
+    });
+    for (const done of release) done();
+    await Promise.all(holders);
+    await Promise.all(waiting);
     assert.equal(argon2InFlight(), 0);
   });
 

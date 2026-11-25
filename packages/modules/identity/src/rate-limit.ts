@@ -1,5 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import pg from "pg";
+import { isTrustedProxyPeer, type TrustProxySetting } from "./proxy-address.ts";
 
 const limitedPaths = new Set([
   "/api/auth/sign-in/email",
@@ -17,15 +18,26 @@ export function isCredentialRoute(url: string): boolean {
 }
 
 /**
- * `request.ip` already applies Fastify `trustProxy`. CF-Connecting-IP is
- * read only when the operator has set GOTONG_TRUST_CLOUDFLARE, so a client
- * that can reach the origin cannot spoof the rate-limit key.
+ * `request.ip` already applies Fastify `trustProxy`. CF-Connecting-IP is used
+ * only when `trustCloudflare` is true and the socket peer is a trusted proxy.
+ * A direct public client cannot rotate the header to get a fresh bucket.
+ * `GOTONG_TRUST_CLOUDFLARE=true` still requires Cloudflare Tunnel or
+ * zone-specific Authenticated Origin Pulls, so untrusted clients cannot open
+ * a connection that looks like the trusted proxy.
  */
 export function clientAddress(
-  request: { ip: string; headers: FastifyRequest["headers"] },
+  request: {
+    ip: string;
+    headers: FastifyRequest["headers"];
+    socket?: { remoteAddress?: string | undefined };
+    raw?: { socket?: { remoteAddress?: string | undefined } };
+  },
   trustCloudflare: boolean,
+  trustProxy: TrustProxySetting = 1,
 ): string {
   if (!trustCloudflare) return request.ip;
+  const peer = request.socket?.remoteAddress ?? request.raw?.socket?.remoteAddress;
+  if (!isTrustedProxyPeer(peer, trustProxy)) return request.ip;
   const header = request.headers["cf-connecting-ip"];
   const raw = Array.isArray(header) ? header[0] : header;
   if (typeof raw !== "string") return request.ip;
@@ -33,9 +45,13 @@ export function clientAddress(
   return ip && ip.length > 0 ? ip : request.ip;
 }
 
-export function rateLimitKey(request: FastifyRequest, trustCloudflare: boolean): string {
+export function rateLimitKey(
+  request: FastifyRequest,
+  trustCloudflare: boolean,
+  trustProxy: TrustProxySetting = 1,
+): string {
   const path = request.url.split("?")[0] ?? request.url;
-  return `${clientAddress(request, trustCloudflare)}:${path}`;
+  return `${clientAddress(request, trustCloudflare, trustProxy)}:${path}`;
 }
 
 export function createPostgresRateLimitStore(pool: pg.Pool) {

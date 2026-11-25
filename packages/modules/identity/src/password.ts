@@ -10,8 +10,8 @@ export const MAX_PASSWORD_LENGTH = 128;
  *
  * Each thread gets its own memoryCost KiB pool. Parallelism stays 1, so one
  * hash reserves 19 MiB (19456 KiB). At most two hashes run at once
- * (`argon2ConcurrencyLimit`), which is about 38 MiB. The per-IP limiter can
- * admit more requests than that; the extra ones wait.
+ * (`argon2ConcurrencyLimit`), which is about 38 MiB. Up to 16 more wait.
+ * A further request fails with status 503 instead of queueing forever.
  *
  * The library default algorithm is Argon2id. `verbatimModuleSyntax` cannot
  * import that package's const enum, so the option is omitted and the PHC
@@ -19,8 +19,8 @@ export const MAX_PASSWORD_LENGTH = 128;
  *
  * password.test.ts prints ARGON2_RSS while hashes are in flight. One hash must
  * stay under 64 MiB of RSS growth and the sampled peak under 96 MiB. Measured
- * on Node 22.23.4: one hash +65,536 bytes, four overlapping hashes peaked at
- * +40,927,232 bytes with 2 in flight.
+ * on Node 22.23.4: one hash +61,440 bytes, four overlapping hashes peaked at
+ * +41,324,544 bytes with 2 in flight.
  */
 export const argon2Parameters = {
   memoryCost: 19_456,
@@ -30,6 +30,7 @@ export const argon2Parameters = {
 } as const;
 
 export const argon2ConcurrencyLimit = 2;
+export const argon2QueueLimit = 16;
 
 let argon2Active = 0;
 const argon2Waiters: Array<() => void> = [];
@@ -79,6 +80,10 @@ function acquireArgon2Slot(): Promise<void> {
   if (argon2Active < argon2ConcurrencyLimit) {
     argon2Active += 1;
     return Promise.resolve();
+  }
+  if (argon2Waiters.length >= argon2QueueLimit) {
+    const error = new Error("Password hashing is overloaded.");
+    return Promise.reject(Object.assign(error, { statusCode: 503 }));
   }
   return new Promise((resolve) => {
     argon2Waiters.push(() => {

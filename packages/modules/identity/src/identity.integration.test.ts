@@ -474,6 +474,60 @@ describe("identity auth", { concurrency: 1 }, () => {
     assert.ok(failure.reason instanceof SingleTenantOccupiedError);
     assert.equal(await tenantCount(appDb.pool), 1);
   });
+
+  it("redacts internal errors from auth routes", async () => {
+    const local = Fastify({ logger: false });
+    await registerIdentity(local, {
+      auth,
+      appDb,
+      env: { ...process.env, NODE_ENV: "test" },
+    });
+    const response = await local.inject({ method: "GET", url: "/api/auth/__test/fail" });
+    assert.equal(response.statusCode, 500);
+    const body = response.json() as { error: { code: string; message: string } };
+    assert.equal(body.error.code, "internal_error");
+    assert.equal(body.error.message, "Request failed.");
+    assert.equal(response.body.includes("database password"), false);
+    assert.equal(response.body.includes("secret"), false);
+    await local.close();
+  });
+
+  it("keeps a separate rate-limit bucket per Cloudflare client", async () => {
+    const limited = Fastify({ logger: false });
+    await registerIdentity(limited, {
+      auth,
+      appDb,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        GOTONG_TRUST_CLOUDFLARE: "true",
+        GOTONG_TRUST_PROXY: "1",
+      },
+      rateLimitMax: 2,
+      rateLimitWindowMs: 60_000,
+    });
+    const post = (ip: string) =>
+      limited.inject({
+        method: "POST",
+        url: "/api/auth/sign-in/email",
+        remoteAddress: "127.0.0.1",
+        headers: {
+          origin,
+          "content-type": "application/json",
+          "cf-connecting-ip": ip,
+        },
+        payload: { email: "nobody-cf@gotonghr.test", password: "not-a-real-password" },
+      });
+    const first = await post("203.0.113.10");
+    const second = await post("203.0.113.10");
+    const third = await post("203.0.113.10");
+    const other = await post("203.0.113.11");
+    assert.notEqual(first.statusCode, 429);
+    assert.notEqual(second.statusCode, 429);
+    assert.equal(third.statusCode, 429);
+    assert.notEqual(other.statusCode, 429);
+    await limited.close();
+  });
 });
 
 async function signIn(app: FastifyInstance, email: string, password: string) {
