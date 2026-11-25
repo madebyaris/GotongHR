@@ -9,6 +9,10 @@ test("a grant token is stored as a sha-256 hash", () => {
   assert.equal(hash, hashToken(token));
   assert.notEqual(hash, token);
   assert.equal(hash.includes(token), false);
+  assert.equal(
+    hashToken("gotonghr"),
+    "64e3c260d3db19819a77df20454d47560aec5f77e085841f02dc1d452c7221a3",
+  );
 });
 
 test("grant expiry is in the future and at most four hours", () => {
@@ -17,6 +21,8 @@ test("grant expiry is in the future and at most four hours", () => {
   assert.equal(expiryError(now, now), "past");
   assert.equal(expiryError(new Date("2026-11-25T04:00:00.000Z"), now), null);
   assert.equal(expiryError(new Date("2026-11-25T04:00:00.001Z"), now), "too_long");
+  assert.equal(expiryError(new Date("not-a-date"), now), "past");
+  assert.equal(expiryError(new Date(Number.NaN), now), "past");
 });
 
 test("an invite token verifies once and then expires", () => {

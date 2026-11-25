@@ -11,6 +11,7 @@ export interface PlatformMigrateInput {
 const PROVISION =
   "sys_provision_tenant(text, text, text, text, text, text, jsonb, text)";
 const SET_STATUS = "sys_set_tenant_status(uuid, text)";
+const OPERATOR_EXISTS = "sys_platform_operator_exists(uuid)";
 
 /**
  * Platform tables and the two definer functions request handlers call.
@@ -48,6 +49,10 @@ export async function migratePlatform(input: PlatformMigrateInput): Promise<void
         await admin.query(`REVOKE ALL ON FUNCTION ${signature} FROM ${QUEUE_ROLE}`);
         await admin.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${PLATFORM_ROLE}`);
       }
+      await admin.query(`REVOKE ALL ON FUNCTION ${OPERATOR_EXISTS} FROM PUBLIC`);
+      await admin.query(`REVOKE ALL ON FUNCTION ${OPERATOR_EXISTS} FROM ${PLATFORM_ROLE}`);
+      await admin.query(`REVOKE ALL ON FUNCTION ${OPERATOR_EXISTS} FROM ${QUEUE_ROLE}`);
+      await admin.query(`GRANT EXECUTE ON FUNCTION ${OPERATOR_EXISTS} TO ${APP_ROLE}`);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");
@@ -71,16 +76,18 @@ async function grantPlatformTables(client: pg.Client): Promise<void> {
     await client.query(`REVOKE ALL ON TABLE ${table} FROM ${QUEUE_ROLE}`);
     await client.query(`REVOKE ALL ON TABLE ${table} FROM ${PLATFORM_ROLE}`);
   }
-  for (const table of ["sys_plans", "sys_tenant_quotas", "sys_platform_operators"]) {
-    await client.query(
-      `GRANT SELECT, INSERT, UPDATE ON TABLE ${table} TO ${PLATFORM_ROLE}`,
-    );
+  for (const table of ["sys_plans", "sys_platform_operators"]) {
+    await client.query(`GRANT SELECT, INSERT, UPDATE ON TABLE ${table} TO ${PLATFORM_ROLE}`);
   }
+  await client.query(`GRANT SELECT, INSERT ON TABLE sys_tenant_quotas TO ${PLATFORM_ROLE}`);
+  await client.query(`
+    GRANT UPDATE (
+      plan_id, subdomain, custom_domain, max_seats, max_branches, max_storage_mb,
+      monthly_ai_tokens, feature_flags_json, owner_invite_token_hash, updated_at
+    ) ON TABLE sys_tenant_quotas TO ${PLATFORM_ROLE}
+  `);
   await client.query(
     `GRANT SELECT, INSERT ON TABLE sys_platform_audit_events TO ${PLATFORM_ROLE}`,
-  );
-  await client.query(
-    `GRANT SELECT (id, role) ON TABLE sys_platform_operators TO ${APP_ROLE}`,
   );
 }
 
@@ -184,7 +191,9 @@ CREATE TABLE IF NOT EXISTS sys_support_grants (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT sys_support_grants_scope_check CHECK (scope IN ('read_only', 'read_write')),
-  CONSTRAINT sys_support_grants_expiry_after_create CHECK (expires_at > created_at),
+  CONSTRAINT sys_support_grants_expiry_after_create CHECK (
+    expires_at > created_at AND expires_at <= created_at + interval '4 hours'
+  ),
   CONSTRAINT sys_support_grants_reason_check CHECK (length(trim(reason)) > 0)
 );
 CREATE INDEX IF NOT EXISTS sys_support_grants_tenant_id_idx ON sys_support_grants (tenant_id);
@@ -230,6 +239,10 @@ ON CONFLICT (code) DO NOTHING;
 
 COMMENT ON TABLE sys_support_grants IS 'Break-glass grant. token_hash is SHA-256 of a single-use token. The plaintext is not stored.';
 COMMENT ON TABLE sys_platform_audit_events IS 'Append-only platform operator log. platform_admin has INSERT and SELECT only.';
+
+ALTER TABLE sys_support_grants DROP CONSTRAINT IF EXISTS sys_support_grants_expiry_after_create;
+ALTER TABLE sys_support_grants ADD CONSTRAINT sys_support_grants_expiry_after_create
+  CHECK (expires_at > created_at AND expires_at <= created_at + interval '4 hours');
 `;
 
 const functionSql = `
@@ -363,5 +376,15 @@ BEGIN
 
   RETURN QUERY SELECT v_tenant_id, v_org_id, v_user_id, v_owner_id;
 END
+$fn$;
+
+CREATE OR REPLACE FUNCTION sys_platform_operator_exists(p_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $fn$
+  SELECT EXISTS (SELECT 1 FROM sys_platform_operators WHERE id = p_id);
 $fn$;
 `;

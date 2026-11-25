@@ -8,7 +8,6 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import {
   membershipsForAuthUser,
   sessionHasTotpVerification,
-  tenantAccessForAuthUser,
   type MembershipRecord,
 } from "./directory.ts";
 
@@ -50,7 +49,7 @@ export type AuthResult =
 /**
  * Order: session, suspended tenant, tenant header, permission, then TOTP.
  * Scope flags are attached for later slices. This slice does not filter rows by them.
- * Omit `permission` when the caller only needs a membership, such as a support grant.
+ * Support-grant writes pass `tenant.support_grant.write`, which requires TOTP.
  */
 export async function authenticateRequest(
   request: FastifyRequest,
@@ -62,19 +61,22 @@ export async function authenticateRequest(
     await handle.auth.api.getSession({ headers: webHeaders(request.headers) }),
   );
   if (!session) return denied(401, "unauthenticated", "Sign in required.");
-  const access = await tenantAccessForAuthUser(handle.appDb.pool, session.user.id);
+  const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
   const header = tenantHeader(request.headers);
   if (
     typeof header === "string" &&
-    access.some((row) => row.tenantId.toLowerCase() === header && row.status === "suspended")
+    memberships.some((row) => row.tenantId.toLowerCase() === header && row.status === "suspended")
   ) {
     return denied(403, "tenant_suspended", "Tenant is suspended.");
   }
-  const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
-  if (memberships.length === 0 && access.some((row) => row.status === "suspended")) {
+  if (memberships.length > 0 && memberships.every((row) => row.status === "suspended")) {
     return denied(403, "tenant_suspended", "Tenant is suspended.");
   }
-  const selected = selectMembership(memberships, header, session.session.activeOrganizationId);
+  const selected = selectMembership(
+    memberships.filter((row) => row.status === "active"),
+    header,
+    session.session.activeOrganizationId,
+  );
   if (selected === "none") return denied(403, "no_membership", "No active membership.");
   if (selected === "mismatch") {
     return denied(403, "tenant_mismatch", "The tenant header does not match a membership.");

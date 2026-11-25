@@ -6,7 +6,6 @@ test("platform routes mount for multi-tenant modes only", () => {
   assert.equal(platformApiMounted("single_tenant"), false);
   assert.equal(platformApiMounted("multi_tenant_saas"), true);
   assert.equal(platformApiMounted("holding_multi_tenant"), true);
-  assert.equal(platformApiMounted(""), false);
 });
 
 test("the platform URL is required and cannot be the migrator role", () => {

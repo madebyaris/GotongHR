@@ -47,12 +47,41 @@ export interface TenantConfigPatch {
   featureFlags?: Partial<Record<FeatureFlagKey, boolean>>;
 }
 
-export async function provisionTenant(
+type SqlQueryable = Pick<pg.Pool, "query"> | pg.PoolClient;
+
+const DEFAULT_TENANT_PAGE = 50;
+const MAX_TENANT_PAGE = 100;
+
+export interface TenantPage {
+  items: TenantSummary[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+export async function withPlatformTx<T>(
   platform: PlatformDatabase,
+  fn: (client: pg.PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await platform.pool.connect();
+  try {
+    await client.query("BEGIN");
+    const value = await fn(client);
+    await client.query("COMMIT");
+    return value;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function provisionTenant(
+  queryable: SqlQueryable,
   input: ProvisionTenantInput,
 ): Promise<ProvisionedTenant> {
   try {
-    const result = await platform.pool.query<{
+    const result = await queryable.query<{
       tenant_id: string;
       organization_id: string;
       auth_user_id: string;
@@ -85,11 +114,11 @@ export async function provisionTenant(
 }
 
 export async function storeInviteHash(
-  platform: PlatformDatabase,
+  queryable: SqlQueryable,
   tenantId: string,
   inviteTokenHash: string,
 ): Promise<void> {
-  const result = await platform.pool.query(
+  const result = await queryable.query(
     `UPDATE sys_tenant_quotas
      SET owner_invite_token_hash = $2, updated_at = now()
      WHERE tenant_id = $1`,
@@ -101,24 +130,38 @@ export async function storeInviteHash(
 }
 
 export async function setTenantStatus(
-  platform: PlatformDatabase,
+  queryable: SqlQueryable,
   tenantId: string,
   status: "active" | "suspended",
 ): Promise<void> {
   try {
-    await platform.pool.query("SELECT sys_set_tenant_status($1::uuid, $2)", [tenantId, status]);
+    await queryable.query("SELECT sys_set_tenant_status($1::uuid, $2)", [tenantId, status]);
   } catch (error) {
     throw mapped(error);
   }
 }
 
-export async function listTenants(platform: PlatformDatabase): Promise<TenantSummary[]> {
+export async function listTenants(
+  platform: PlatformDatabase,
+  input: { cursor?: string; limit?: number } = {},
+): Promise<TenantPage> {
+  const limit = pageLimit(input.limit);
+  const cursor = decodeCursor(input.cursor);
   const result = await platform.pool.query<TenantRow>(
     `${tenantSelect}
-     ORDER BY t.created_at
-     LIMIT 200`,
+     WHERE ($1::timestamptz IS NULL OR (t.created_at, t.id) < ($1::timestamptz, $2::uuid))
+     ORDER BY t.created_at DESC, t.id DESC
+     LIMIT $3`,
+    [cursor?.createdAt ?? null, cursor?.id ?? null, limit + 1],
   );
-  return result.rows.map(toSummary);
+  const hasMore = result.rows.length > limit;
+  const page = hasMore ? result.rows.slice(0, limit) : result.rows;
+  const last = page.at(-1);
+  return {
+    items: page.map(toSummary),
+    hasMore,
+    nextCursor: hasMore && last ? encodeCursor(last) : null,
+  };
 }
 
 export async function updateTenantConfig(
@@ -126,24 +169,26 @@ export async function updateTenantConfig(
   tenantId: string,
   patch: TenantConfigPatch,
 ): Promise<TenantSummary> {
-  const current = await platform.pool.query<TenantRow>(`${tenantSelect} WHERE t.id = $1`, [
-    tenantId,
-  ]);
-  const row = current.rows[0];
-  if (!row) throw new PlatformError(404, "not_found", "Tenant was not found.");
-  const flags = mergeFlags(parseFlags(row.feature_flags_json), patch.featureFlags);
-  let planId = row.plan_id;
-  if (patch.planCode && patch.planCode !== row.plan_code) {
-    const plan = await platform.pool.query<{ id: string }>(
-      "SELECT id FROM sys_plans WHERE code = $1",
-      [patch.planCode],
-    );
-    const next = plan.rows[0];
-    if (!next) throw new PlatformError(400, "unknown_plan", "Plan was not found.");
-    planId = next.id;
-  }
+  const client = await platform.pool.connect();
   try {
-    await platform.pool.query(
+    await client.query("BEGIN");
+    const current = await client.query<TenantRow>(
+      `${tenantSelect} WHERE t.id = $1 FOR UPDATE OF q`,
+      [tenantId],
+    );
+    const row = current.rows[0];
+    if (!row) throw new PlatformError(404, "not_found", "Tenant was not found.");
+    const flags = mergeFlags(parseFlags(row.feature_flags_json), patch.featureFlags);
+    let planId = row.plan_id;
+    if (patch.planCode && patch.planCode !== row.plan_code) {
+      const plan = await client.query<{ id: string }>("SELECT id FROM sys_plans WHERE code = $1", [
+        patch.planCode,
+      ]);
+      const next = plan.rows[0];
+      if (!next) throw new PlatformError(400, "unknown_plan", "Plan was not found.");
+      planId = next.id;
+    }
+    await client.query(
       `UPDATE sys_tenant_quotas
        SET plan_id = $2,
            subdomain = $3,
@@ -167,15 +212,17 @@ export async function updateTenantConfig(
         JSON.stringify(flags),
       ],
     );
+    const updated = await client.query<TenantRow>(`${tenantSelect} WHERE t.id = $1`, [tenantId]);
+    const summary = updated.rows[0];
+    if (!summary) throw new PlatformError(404, "not_found", "Tenant was not found.");
+    await client.query("COMMIT");
+    return toSummary(summary);
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     throw mapped(error);
+  } finally {
+    client.release();
   }
-  const updated = await platform.pool.query<TenantRow>(`${tenantSelect} WHERE t.id = $1`, [
-    tenantId,
-  ]);
-  const summary = updated.rows[0];
-  if (!summary) throw new PlatformError(404, "not_found", "Tenant was not found.");
-  return toSummary(summary);
 }
 
 export async function registerPlatformOperator(
@@ -206,7 +253,17 @@ export interface HealthTenant {
 }
 
 export async function listTenantHealth(platform: PlatformDatabase): Promise<HealthTenant[]> {
-  const tenants = await listTenants(platform);
+  const tenants: TenantSummary[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 40; page += 1) {
+    const listed = await listTenants(platform, {
+      limit: MAX_TENANT_PAGE,
+      ...(cursor ? { cursor } : {}),
+    });
+    tenants.push(...listed.items);
+    if (!listed.hasMore || !listed.nextCursor) break;
+    cursor = listed.nextCursor;
+  }
   return tenants.map((tenant) => ({
     tenantId: tenant.id,
     status: tenant.status,
@@ -289,6 +346,7 @@ interface TenantRow {
   name: string;
   slug: string;
   status: string;
+  created_at: string;
   plan_id: string;
   plan_code: string;
   subdomain: string | null;
@@ -302,6 +360,7 @@ interface TenantRow {
 
 const tenantSelect = `
   SELECT t.id, t.name, t.slug, t.status,
+         to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
          q.plan_id, p.code AS plan_code, q.subdomain, q.custom_domain,
          q.max_seats, q.max_branches, q.max_storage_mb, q.monthly_ai_tokens,
          q.feature_flags_json
@@ -356,6 +415,28 @@ function mergeFlags(
     if (typeof value === "boolean") next[key] = value;
   }
   return next;
+}
+
+function pageLimit(value: number | undefined): number {
+  if (value === undefined || !Number.isInteger(value) || value < 1) return DEFAULT_TENANT_PAGE;
+  return Math.min(value, MAX_TENANT_PAGE);
+}
+
+function encodeCursor(row: TenantRow): string {
+  return Buffer.from(`${row.created_at}|${row.id}`).toString("base64url");
+}
+
+function decodeCursor(value: string | undefined): { createdAt: string; id: string } | null {
+  if (!value) return null;
+  const decoded = Buffer.from(value, "base64url").toString("utf8");
+  const splitAt = decoded.lastIndexOf("|");
+  const createdAt = decoded.slice(0, splitAt);
+  const id = decoded.slice(splitAt + 1);
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+  if (splitAt <= 0 || !uuid.test(id) || Number.isNaN(Date.parse(createdAt))) {
+    throw new PlatformError(400, "invalid", "The request was invalid.");
+  }
+  return { createdAt, id };
 }
 
 function roleSeed(): unknown[] {

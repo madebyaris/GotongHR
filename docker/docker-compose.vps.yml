@@ -97,6 +97,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.web
+      args:
+        VITE_DEPLOYMENT_MODE: ${GOTONG_DEPLOYMENT_MODE:-single_tenant}
     mem_limit: 64m
     ports:
       - "80:8080"

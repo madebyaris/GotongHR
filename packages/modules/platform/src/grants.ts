@@ -41,10 +41,10 @@ export async function createSupportGrant(
   const tokenHash = hashToken(token);
   try {
     const created = await app.withTenantContext(input.tenantId, async (tx) => {
-      const operator = await tx.execute<{ id: string }>(sql`
-        SELECT id FROM sys_platform_operators WHERE id = ${input.granteePlatformUserId}::uuid
+      const operator = await tx.execute<{ ok: boolean }>(sql`
+        SELECT sys_platform_operator_exists(${input.granteePlatformUserId}::uuid) AS ok
       `);
-      if (!operator.rows[0]) {
+      if (operator.rows[0]?.ok !== true) {
         throw new PlatformError(400, "unknown_operator", "Platform operator was not found.");
       }
       const window = await tx.execute<{ ok: boolean }>(sql`
@@ -151,7 +151,7 @@ export async function withSupportSession<T>(
   platform: PlatformDatabase,
   app: TenantDatabase,
   input: { sessionToken: string; actorId: string; ip: string | null },
-  fn: (tx: TenantTx) => Promise<T>,
+  fn: (input: { tx: TenantTx; scope: GrantScope; allowPiiReveal: boolean }) => Promise<T>,
 ): Promise<{ tenantId: string; contextTenantId: string; result: T }> {
   const sessionHash = hashToken(input.sessionToken);
   const found = await platform.pool.query<GrantState>(
@@ -175,7 +175,10 @@ export async function withSupportSession<T>(
     if (contextTenantId !== row.tenant_id) {
       throw new PlatformError(500, "internal_error", "Tenant context did not match the grant.");
     }
-    const value = await fn(tx);
+    if (scope === "read_only") {
+      await tx.execute(sql`SET LOCAL TRANSACTION READ ONLY`);
+    }
+    const value = await fn({ tx, scope, allowPiiReveal: row.allow_pii_reveal });
     return { contextTenantId, value };
   });
   await writeAudit(platform.pool, {

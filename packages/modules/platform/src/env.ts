@@ -1,5 +1,13 @@
 const PLATFORM_ROLE = "platform_admin";
 
+export const deploymentModes = [
+  "single_tenant",
+  "multi_tenant_saas",
+  "holding_multi_tenant",
+] as const;
+
+export type DeploymentMode = (typeof deploymentModes)[number];
+
 /**
  * The request pool is `DATABASE_URL_PLATFORM` only.
  * A missing value throws. It is never replaced with the migrator URL.
@@ -21,9 +29,9 @@ export function readPlatformDatabaseUrl(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * `single_tenant` does not mount `/api/v1/platform/*`.
+ * `single_tenant` does not mount platform or tenant support-grant routes.
  * Both multi-tenant modes do, matching the architecture spec and the web shell.
  */
-export function platformApiMounted(mode: string): boolean {
+export function platformApiMounted(mode: DeploymentMode): boolean {
   return mode === "multi_tenant_saas" || mode === "holding_multi_tenant";
 }

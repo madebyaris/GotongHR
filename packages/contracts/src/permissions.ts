@@ -8,6 +8,7 @@ export const permissionAtoms = [
   "payroll.coretax.export",
   "ai.action.approve",
   "audit.log.read",
+  "tenant.support_grant.write",
 ] as const;
 
 export type PermissionAtom = (typeof permissionAtoms)[number];

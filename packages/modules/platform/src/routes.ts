@@ -21,6 +21,7 @@ import {
   setTenantStatus,
   storeInviteHash,
   updateTenantConfig,
+  withPlatformTx,
   writeAudit,
   type TenantConfigPatch,
 } from "./tenants.ts";
@@ -133,11 +134,18 @@ const idParam = z.object({
   id: z.uuid(),
 });
 
+const tenantListQuery = z.object({
+  cursor: z.string().min(1).max(300).optional(),
+  limit: z.string().regex(/^[1-9][0-9]{0,2}$/u).optional(),
+});
+
 /**
- * Tenant grant routes are always mounted. `/api/v1/platform/*` is mounted only
- * when `mountPlatformRoutes` is true. Slice 1.3 adds the tenant `aud_events` copy.
+ * Platform routes and tenant support-grant routes mount together.
+ * `single_tenant` leaves both unmounted. Slice 1.3 adds the tenant audit copy.
  */
 export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps): Promise<void> {
+  if (!deps.mountPlatformRoutes) return;
+
   app.post("/api/v1/tenant/support-grants", async (request, reply) => {
     const admin = await requireTenantAdmin(deps, request, reply);
     if (!admin) return;
@@ -173,51 +181,63 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     });
   });
 
-  if (!deps.mountPlatformRoutes) return;
-
   app.get("/api/v1/platform/tenants", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
-    await run(reply, async () => reply.send(ok(await listTenants(deps.platform))));
+    const query = await parseBody(reply, tenantListQuery, request.query);
+    if (!query) return;
+    await run(reply, async () => {
+      const page = await listTenants(deps.platform, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: Number(query.limit) } : {}),
+      });
+      return reply.send(ok(page.items, { hasMore: page.hasMore, nextCursor: page.nextCursor }));
+    });
   });
 
   app.post("/api/v1/platform/tenants", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
+    if (!(await requireSuperAdmin(actor, reply))) return;
     const body = await parseBody(reply, createTenantBody, request.body);
     if (!body) return;
     await run(reply, async () => {
       const planCode = body.planCode ?? "starter";
-      const created = await provisionTenant(deps.platform, {
-        name: body.name,
-        slug: body.slug,
-        ownerEmail: body.ownerEmail.toLowerCase(),
-        ownerName: body.ownerName,
-        passwordHash: await deps.hashOwnerPassword(body.ownerPassword),
-        planCode,
-        inviteTokenHash: hashToken(randomToken()),
-      });
-      const inviteToken = signInvite(deps.inviteSecret, {
-        tenantId: created.tenantId,
-        email: body.ownerEmail.toLowerCase(),
-        exp: Date.now() + INVITE_TTL_MS,
-      });
-      await storeInviteHash(deps.platform, created.tenantId, hashToken(inviteToken));
-      await writeAudit(deps.platform.pool, {
-        actorId: actor.id,
-        action: "tenant.create",
-        tenantId: created.tenantId,
-        grantId: null,
-        diff: { slug: body.slug, planCode },
-        ip: actor.ip,
+      const email = body.ownerEmail.toLowerCase();
+      const passwordHash = await deps.hashOwnerPassword(body.ownerPassword);
+      const recorded = await withPlatformTx(deps.platform, async (client) => {
+        const created = await provisionTenant(client, {
+          name: body.name,
+          slug: body.slug,
+          ownerEmail: email,
+          ownerName: body.ownerName,
+          passwordHash,
+          planCode,
+          inviteTokenHash: hashToken(randomToken()),
+        });
+        const inviteToken = signInvite(deps.inviteSecret, {
+          tenantId: created.tenantId,
+          email,
+          exp: Date.now() + INVITE_TTL_MS,
+        });
+        await storeInviteHash(client, created.tenantId, hashToken(inviteToken));
+        await writeAudit(client, {
+          actorId: actor.id,
+          action: "tenant.create",
+          tenantId: created.tenantId,
+          grantId: null,
+          diff: { slug: body.slug, planCode },
+          ip: actor.ip,
+        });
+        return { created, inviteToken };
       });
       return reply.code(201).send(
         ok({
-          id: created.tenantId,
-          organizationId: created.organizationId,
+          id: recorded.created.tenantId,
+          organizationId: recorded.created.organizationId,
           slug: body.slug,
           planCode,
-          inviteToken,
+          inviteToken: recorded.inviteToken,
         }),
       );
     });
@@ -226,19 +246,22 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
   app.patch("/api/v1/platform/tenants/:id/status", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
+    if (!(await requireSuperAdmin(actor, reply))) return;
     const params = await parseBody(reply, idParam, request.params);
     if (!params) return;
     const body = await parseBody(reply, statusBody, request.body);
     if (!body) return;
     await run(reply, async () => {
-      await setTenantStatus(deps.platform, params.id, body.status);
-      await writeAudit(deps.platform.pool, {
-        actorId: actor.id,
-        action: "tenant.status",
-        tenantId: params.id,
-        grantId: null,
-        diff: { status: body.status },
-        ip: actor.ip,
+      await withPlatformTx(deps.platform, async (client) => {
+        await setTenantStatus(client, params.id, body.status);
+        await writeAudit(client, {
+          actorId: actor.id,
+          action: "tenant.status",
+          tenantId: params.id,
+          grantId: null,
+          diff: { status: body.status },
+          ip: actor.ip,
+        });
       });
       return reply.send(ok({ id: params.id, status: body.status }));
     });
@@ -247,6 +270,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
   app.patch("/api/v1/platform/tenants/:id/config", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
+    if (!(await requireSuperAdmin(actor, reply))) return;
     const params = await parseBody(reply, idParam, request.params);
     if (!params) return;
     const body = await parseBody(reply, configBody, request.body);
@@ -287,12 +311,14 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
   app.post("/api/v1/platform/statutory-tables", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
+    if (!(await requireSuperAdmin(actor, reply))) return;
     return reply.code(501).send(fail("not_implemented", "Statutory drafts land in a later slice."));
   });
 
   app.post("/api/v1/platform/statutory-tables/:id/publish", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
+    if (!(await requireSuperAdmin(actor, reply))) return;
     return reply.code(501).send(fail("not_implemented", "Statutory publishing lands in a later slice."));
   });
 
@@ -354,6 +380,12 @@ function definedFlags(
     if (typeof value === "boolean") patch[key] = value;
   }
   return patch;
+}
+
+async function requireSuperAdmin(actor: PlatformActor, reply: FastifyReply): Promise<boolean> {
+  if (actor.role === "platform_super_admin") return true;
+  await reply.code(403).send(fail("forbidden", "Missing permission."));
+  return false;
 }
 
 async function requireActor(

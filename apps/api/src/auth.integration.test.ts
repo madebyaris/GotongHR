@@ -116,6 +116,7 @@ describe("api identity", { concurrency: 1 }, () => {
       "/api/v1/platform/statutory-tables",
       "/api/v1/platform/support-grants/activate",
       "/api/v1/platform/audit-events",
+      "/api/v1/tenant/support-grants",
     ]) {
       const platform = await composed.app.inject({ method: "GET", url });
       assert.equal(platform.statusCode, 404, url);
@@ -127,6 +128,18 @@ describe("api identity", { concurrency: 1 }, () => {
       payload: { token: "not-a-token" },
     });
     assert.equal(activate.statusCode, 404);
+    const tenantGrant = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/tenant/support-grants",
+      headers: { "content-type": "application/json" },
+      payload: { reason: "unused" },
+    });
+    assert.equal(tenantGrant.statusCode, 404);
+    const tenantRevoke = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/tenant/support-grants/00000000-0000-4000-8000-000000000001/revoke",
+    });
+    assert.equal(tenantRevoke.statusCode, 404);
     const signedIn = await signIn(ownerEmail, ownerPassword);
     const cookies = setCookies(signedIn).join("\n");
     assert.match(cookies, /HttpOnly/i);

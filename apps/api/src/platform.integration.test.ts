@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { ok } from "@gotonghr/contracts";
 import {
@@ -127,8 +127,36 @@ describe("platform admin", { concurrency: 1 }, () => {
         client.query("UPDATE sys_platform_audit_events SET action = action"),
         isPermissionDenied,
       );
+      await assert.rejects(
+        client.query("UPDATE sys_tenant_quotas SET status = 'suspended'"),
+        isPermissionDenied,
+      );
+      await client.query("UPDATE sys_tenant_quotas SET max_seats = max_seats");
     } finally {
       await client.end();
+    }
+
+    const app = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_APP") });
+    await app.connect();
+    try {
+      await assert.rejects(app.query("SELECT id FROM sys_platform_operators"), isPermissionDenied);
+      const known = await app.query<{ ok: boolean }>(
+        "SELECT sys_platform_operator_exists($1::uuid) AS ok",
+        [operatorId],
+      );
+      assert.equal(known.rows[0]?.ok, true);
+      const other = await app.query<{ ok: boolean }>(
+        "SELECT sys_platform_operator_exists($1::uuid) AS ok",
+        [otherOperatorId],
+      );
+      assert.equal(other.rows[0]?.ok, true);
+      const missing = await app.query<{ ok: boolean }>(
+        "SELECT sys_platform_operator_exists($1::uuid) AS ok",
+        ["00000000-0000-0000-0000-000000000000"],
+      );
+      assert.equal(missing.rows[0]?.ok, false);
+    } finally {
+      await app.end();
     }
   });
 
@@ -139,15 +167,22 @@ describe("platform admin", { concurrency: 1 }, () => {
 
     const suffix = randomUUID().slice(0, 8);
     const ownerEmail = `owner-${suffix}@gotonghr.test`;
+    const opsSignIn = await signIn(otherEmail, otherPassword);
+    assert.equal(opsSignIn.statusCode, 200, opsSignIn.body);
+    const opsCookie = cookieHeader(setCookies(opsSignIn));
+    const tenantBody = {
+      name: "Acme HQ",
+      slug: `acme-${suffix}`,
+      ownerEmail,
+      ownerName: "Owner",
+      ownerPassword,
+    };
+    const opsCreate = await post("/api/v1/platform/tenants", tenantBody, opsCookie);
+    assert.equal(opsCreate.statusCode, 403, opsCreate.body);
+    assert.equal(readError(opsCreate.body), "forbidden");
     const created = await post(
       "/api/v1/platform/tenants",
-      {
-        name: "Acme HQ",
-        slug: `acme-${suffix}`,
-        ownerEmail,
-        ownerName: "Owner",
-        ownerPassword,
-      },
+      tenantBody,
       operatorCookie,
     );
     assert.equal(created.statusCode, 201, created.body);
@@ -168,6 +203,29 @@ describe("platform admin", { concurrency: 1 }, () => {
     const invite = verifyInvite(readAuthSecret(process.env), tenant.inviteToken);
     assert.equal(invite?.email, ownerEmail);
     assert.equal(invite?.tenantId, tenant.id);
+    await assert.rejects(
+      superuserQuery(
+        `INSERT INTO sys_support_grants (
+           tenant_id, granted_by_user_id, grantee_platform_user_id, token_hash, reason, expires_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'too long', now() + interval '5 hours')`,
+        [tenant.id, tenant.id, operatorId, `too-long-${suffix}`],
+      ),
+      isCheckViolation,
+    );
+
+    const opsSuspend = await patch(
+      `/api/v1/platform/tenants/${tenant.id}/status`,
+      { status: "suspended" },
+      opsCookie,
+    );
+    assert.equal(opsSuspend.statusCode, 403, opsSuspend.body);
+    assert.equal(readError(opsSuspend.body), "forbidden");
+    const opsConfig = await patch(
+      `/api/v1/platform/tenants/${tenant.id}/config`,
+      { maxSeats: 10 },
+      opsCookie,
+    );
+    assert.equal(opsConfig.statusCode, 403, opsConfig.body);
 
     const ownerSignIn = await signIn(ownerEmail, ownerPassword);
     assert.equal(ownerSignIn.statusCode, 200, ownerSignIn.body);
@@ -200,9 +258,10 @@ describe("platform admin", { concurrency: 1 }, () => {
     const blockedProbe = await get("/api/v1/probe/session", ownerCookie);
     assert.equal(blockedProbe.statusCode, 403, blockedProbe.body);
     assert.equal(readError(blockedProbe.body), "tenant_suspended");
-    const listed = readData<Array<{ id: string; status: string }>>(
-      (await get("/api/v1/platform/tenants", operatorCookie)).body,
-    );
+    const listedResponse = await get("/api/v1/platform/tenants", operatorCookie);
+    const listed = readData<Array<{ id: string; status: string }>>(listedResponse.body);
+    const listedMeta = JSON.parse(listedResponse.body) as { meta?: { hasMore?: boolean } };
+    assert.equal(listedMeta.meta?.hasMore, false);
     assert.equal(listed.find((row) => row.id === tenant.id)?.status, "suspended");
 
     const restored = await patch(
@@ -216,6 +275,14 @@ describe("platform admin", { concurrency: 1 }, () => {
     ownerCookie = cookieHeader(setCookies(ownerAgain));
     const openProbe = await get("/api/v1/probe/session", ownerCookie);
     assert.equal(openProbe.statusCode, 200, openProbe.body);
+    const ownerNeedsTotp = await post(
+      "/api/v1/tenant/support-grants",
+      grantBody(operatorId),
+      ownerCookie,
+    );
+    assert.equal(ownerNeedsTotp.statusCode, 403, ownerNeedsTotp.body);
+    assert.equal(readError(ownerNeedsTotp.body), "totp_enrollment_required");
+    ownerCookie = await confirmTotp(ownerPassword, ownerCookie);
 
     await grantMembership(composed.auth, composed.appDb, {
       tenantId: tenant.id,
@@ -243,10 +310,19 @@ describe("platform admin", { concurrency: 1 }, () => {
     });
     const securitySignIn = await signIn(`security-${suffix}@gotonghr.test`, securityPassword);
     assert.equal(securitySignIn.statusCode, 200, securitySignIn.body);
+    let securityCookie = cookieHeader(setCookies(securitySignIn));
+    const securityNeedsTotp = await post(
+      "/api/v1/tenant/support-grants",
+      grantBody(operatorId),
+      securityCookie,
+    );
+    assert.equal(securityNeedsTotp.statusCode, 403, securityNeedsTotp.body);
+    assert.equal(readError(securityNeedsTotp.body), "totp_enrollment_required");
+    securityCookie = await confirmTotp(securityPassword, securityCookie);
     const securityGrant = await post(
       "/api/v1/tenant/support-grants",
       grantBody(operatorId),
-      cookieHeader(setCookies(securitySignIn)),
+      securityCookie,
     );
     assert.equal(securityGrant.statusCode, 201, securityGrant.body);
 
@@ -323,17 +399,61 @@ describe("platform admin", { concurrency: 1 }, () => {
       hiddenTenant,
     ]);
     try {
+      await assert.rejects(
+        withSupportSession(
+          platform,
+          composed.appDb,
+          { sessionToken: session.sessionToken, actorId: operatorId, ip: null },
+          async ({ tx, scope, allowPiiReveal }) => {
+            assert.equal(scope, "read_only");
+            assert.equal(allowPiiReveal, false);
+            await tx.execute(
+              `INSERT INTO rls_probe (tenant_id) VALUES ('${sqlUuid(tenant.id)}'::uuid)`,
+            );
+          },
+        ),
+        isReadOnly,
+      );
       const visible = await withSupportSession(
         platform,
         composed.appDb,
         { sessionToken: session.sessionToken, actorId: operatorId, ip: null },
-        async (tx) => {
+        async ({ tx, scope, allowPiiReveal }) => {
+          assert.equal(scope, "read_only");
+          assert.equal(allowPiiReveal, false);
           const rows = await tx.execute<{ tenant_id: string }>("SELECT tenant_id FROM rls_probe");
           return rows.rows.map((row) => row.tenant_id);
         },
       );
       assert.equal(visible.contextTenantId, tenant.id);
       assert.deepEqual(visible.result, [tenant.id]);
+
+      const writableGrant = await post(
+        "/api/v1/tenant/support-grants",
+        { ...grantBody(operatorId), scope: "read_write" },
+        ownerCookie,
+      );
+      assert.equal(writableGrant.statusCode, 201, writableGrant.body);
+      const writable = readData<{ token: string }>(writableGrant.body);
+      const writableActivated = await post(
+        "/api/v1/platform/support-grants/activate",
+        { token: writable.token },
+        operatorCookie,
+      );
+      assert.equal(writableActivated.statusCode, 200, writableActivated.body);
+      const writableSession = readData<{ sessionToken: string }>(writableActivated.body);
+      const wrote = await withSupportSession(
+        platform,
+        composed.appDb,
+        { sessionToken: writableSession.sessionToken, actorId: operatorId, ip: null },
+        async ({ tx, scope }) => {
+          assert.equal(scope, "read_write");
+          await tx.execute(`INSERT INTO rls_probe (tenant_id) VALUES ('${sqlUuid(tenant.id)}'::uuid)`);
+          const rows = await tx.execute<{ tenant_id: string }>("SELECT tenant_id FROM rls_probe");
+          return rows.rows.length;
+        },
+      );
+      assert.ok(wrote.result >= 1);
     } finally {
       await superuserQuery("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [
         [tenant.id, hiddenTenant],
@@ -530,6 +650,91 @@ async function superuserQuery<T extends pg.QueryResultRow>(
 
 function isPermissionDenied(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "42501";
+}
+
+function isCheckViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23514";
+}
+
+function isReadOnly(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current && typeof current === "object" && depth < 5; depth += 1) {
+    if ("code" in current && current.code === "25006") return true;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return false;
+}
+
+function sqlUuid(value: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value)) {
+    throw new Error("tenant id is not a uuid");
+  }
+  return value;
+}
+
+async function confirmTotp(password: string, cookie: string): Promise<string> {
+  const enabled = await post("/api/auth/two-factor/enable", { password }, cookie);
+  assert.equal(enabled.statusCode, 200, enabled.body);
+  const enrollment = JSON.parse(enabled.body) as { totpURI?: string };
+  if (!enrollment.totpURI) throw new Error("missing totp uri");
+  const verified = await post(
+    "/api/auth/two-factor/verify-totp",
+    { code: totpFromUri(enrollment.totpURI) },
+    mergeCookies(cookie, setCookies(enabled)),
+  );
+  assert.equal(verified.statusCode, 200, verified.body);
+  return mergeCookies(cookie, [...setCookies(enabled), ...setCookies(verified)]);
+}
+
+function mergeCookies(cookie: string, extra: string[]): string {
+  const jar = new Map<string, string>();
+  for (const part of cookie.split(";")) {
+    const trimmed = part.trim();
+    const name = trimmed.split("=")[0];
+    if (name) jar.set(name, trimmed);
+  }
+  for (const header of extra) {
+    const pair = header.split(";")[0]?.trim() ?? "";
+    const name = pair.split("=")[0];
+    if (name) jar.set(name, pair);
+  }
+  return [...jar.values()].join("; ");
+}
+
+function totpFromUri(uri: string): string {
+  const secret = new URL(uri).searchParams.get("secret");
+  if (!secret) throw new Error("missing totp secret");
+  const key = base32Decode(secret);
+  const counter = Math.floor(Date.now() / 30_000);
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64BE(BigInt(counter));
+  const hmac = createHmac("sha1", key).update(buffer).digest();
+  const offset = (hmac[hmac.length - 1] ?? 0) & 0x0f;
+  const binary =
+    (((hmac[offset] ?? 0) & 0x7f) << 24) |
+    ((hmac[offset + 1] ?? 0) << 16) |
+    ((hmac[offset + 2] ?? 0) << 8) |
+    (hmac[offset + 3] ?? 0);
+  return String(binary % 1_000_000).padStart(6, "0");
+}
+
+function base32Decode(input: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const cleaned = input.replace(/=+$/u, "").toUpperCase().replace(/ /gu, "");
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+  for (const char of cleaned) {
+    const index = alphabet.indexOf(char);
+    if (index < 0) throw new Error("invalid base32");
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((value >>> bits) & 0xff);
+    }
+  }
+  return Buffer.from(bytes);
 }
 
 async function resetRows(): Promise<void> {

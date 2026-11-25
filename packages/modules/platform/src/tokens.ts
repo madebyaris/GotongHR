@@ -12,7 +12,7 @@ export function hashToken(token: string): string {
 
 export function expiryError(expiresAt: Date, now: Date): "past" | "too_long" | null {
   const delta = expiresAt.getTime() - now.getTime();
-  if (delta <= 0) return "past";
+  if (!Number.isFinite(delta) || delta <= 0) return "past";
   if (delta > MAX_GRANT_MS) return "too_long";
   return null;
 }

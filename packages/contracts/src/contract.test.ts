@@ -51,6 +51,7 @@ test("permission atoms are the spec set", () => {
     "payroll.coretax.export",
     "ai.action.approve",
     "audit.log.read",
+    "tenant.support_grant.write",
   ]);
   assert.equal(new Set(permissionAtoms).size, permissionAtoms.length);
   assert.equal(isPermissionAtom("employee.pii.reveal"), true);
@@ -87,4 +88,9 @@ test("built-in roles keep finalize and PII off the employee", () => {
   assert.equal(permissionRequiresPrivilegedTotp("employee.pii.read"), true);
   assert.equal(permissionRequiresPrivilegedTotp("payroll.run.finalize"), true);
   assert.equal(permissionRequiresPrivilegedTotp("attendance.approve"), false);
+  assert.equal(permissionRequiresPrivilegedTotp("tenant.support_grant.write"), true);
+  assert.equal(roleHasPermission("org_owner", "tenant.support_grant.write"), true);
+  assert.equal(roleHasPermission("it_security_admin", "tenant.support_grant.write"), true);
+  assert.equal(roleHasPermission("hr_admin", "tenant.support_grant.write"), false);
+  assert.equal(roleHasPermission("employee", "tenant.support_grant.write"), false);
 });

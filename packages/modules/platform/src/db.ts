@@ -21,8 +21,11 @@ export async function openPlatformDatabase(connectionString: string): Promise<Pl
     );
   });
   try {
-    const role = await pool.query<{ current_user: string }>("SELECT current_user");
-    if (role.rows[0]?.current_user !== "platform_admin") {
+    const role = await pool.query<{ session_user: string; current_user: string }>(
+      "SELECT session_user, current_user",
+    );
+    const row = role.rows[0];
+    if (row?.session_user !== "platform_admin" || row.current_user !== "platform_admin") {
       throw new Error("Platform pool is not platform_admin.");
     }
   } catch (error) {

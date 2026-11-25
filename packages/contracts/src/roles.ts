@@ -79,6 +79,7 @@ export const rolePermissions = {
     "payroll.coretax.export",
     "ai.action.approve",
     "audit.log.read",
+    "tenant.support_grant.write",
   ],
   hr_admin: [
     "employee.pii.read",
@@ -98,14 +99,18 @@ export const rolePermissions = {
   branch_manager: ["attendance.approve"],
   line_manager: ["attendance.approve"],
   employee: [],
-  it_security_admin: ["audit.log.read", "employee.pii.read"],
+  it_security_admin: ["audit.log.read", "employee.pii.read", "tenant.support_grant.write"],
 } as const satisfies Record<RoleCode, readonly PermissionAtom[]>;
 
 export function roleHasPermission(role: RoleCode, atom: PermissionAtom): boolean {
   return rolePermissions[role].some((permission) => permission === atom);
 }
 
-/** Payroll and PII atoms are the routes a privileged role cannot call without TOTP. */
+/** Payroll, PII, and support-grant writes need TOTP from a privileged role. */
 export function permissionRequiresPrivilegedTotp(atom: PermissionAtom): boolean {
-  return atom.startsWith("employee.pii.") || atom.startsWith("payroll.");
+  return (
+    atom === "tenant.support_grant.write" ||
+    atom.startsWith("employee.pii.") ||
+    atom.startsWith("payroll.")
+  );
 }

@@ -24,7 +24,9 @@ export function platformReaders(input: { auth: GotongAuth; platform: PlatformDat
       return { kind: "ok", actor: { id: row.id, role, ip: request.ip || null } };
     },
     async readTenantAdmin(request) {
-      const result = await authenticateRequest(request);
+      const result = await authenticateRequest(request, {
+        permission: "tenant.support_grant.write",
+      });
       if (!result.ok) {
         const denied: TenantAdminResult = {
           kind: "denied",
