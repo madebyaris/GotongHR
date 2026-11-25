@@ -1,3 +1,4 @@
+import { registerAttendanceRoutes } from "@gotonghr/attendance";
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor, PermissionAtom } from "@gotonghr/contracts";
 import { registerCoreHr, registerEmployeeDocuments, registerEmployeeImports } from "@gotonghr/core-hr";
@@ -15,6 +16,8 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requireMember,
+  requireOrgWriter,
   requirePermission,
   type GotongAuth,
 } from "@gotonghr/identity";
@@ -113,6 +116,24 @@ export async function composeFromEnv(
       guard,
       readAuth,
       enqueueEmployeeImport: (message) => sendEmployeeImport(runningBoss, message),
+    });
+    await registerAttendanceRoutes(app, {
+      appDb,
+      adminGuard: requireOrgWriter(),
+      memberGuard: requireMember(),
+      readCaller(request) {
+        const current = request.gotongAuth;
+        if (!current) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: current.tenantId,
+          userId: current.userId,
+          role: current.role,
+          permissions: current.permissions,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
     });
     await registerTenantAi(app, {
       database: appDb,

@@ -27,7 +27,16 @@ const requiredTenantTables = [
   "ai_conversations",
   "ai_knowledge_chunks",
   "ai_messages",
+  "att_approval_delegations",
+  "att_daily_summaries",
+  "att_holidays",
+  "att_leave_balances",
+  "att_leave_requests",
+  "att_leave_types",
+  "att_overtime_requests",
+  "att_rosters",
   "att_secret",
+  "att_shifts",
   "aud_events",
   "aud_outbox_events",
   "aud_pii_access_logs",
@@ -53,6 +62,15 @@ const platformDeniedTables = [
   "ai_conversations",
   "ai_knowledge_chunks",
   "ai_messages",
+  "att_approval_delegations",
+  "att_daily_summaries",
+  "att_holidays",
+  "att_leave_balances",
+  "att_leave_requests",
+  "att_leave_types",
+  "att_overtime_requests",
+  "att_rosters",
+  "att_shifts",
   "hr_documents",
   "hr_employee_pii",
   "hr_employees",
@@ -231,6 +249,15 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "att_rosters",
+      "att_leave_requests",
+      "att_leave_balances",
+      "att_overtime_requests",
+      "att_daily_summaries",
+      "att_holidays",
+      "att_approval_delegations",
+      "att_leave_types",
+      "att_shifts",
       "hr_documents",
       "hr_import_jobs",
       "ai_knowledge_chunks",
@@ -658,6 +685,26 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const chunkB = randomUUID();
   const sopDocA = randomUUID();
   const sopDocB = randomUUID();
+  const shiftA = randomUUID();
+  const shiftB = randomUUID();
+  const rosterA = randomUUID();
+  const rosterB = randomUUID();
+  const holidayA = randomUUID();
+  const holidayB = randomUUID();
+  const leaveTypeA = randomUUID();
+  const leaveTypeB = randomUUID();
+  const leaveBalanceA = randomUUID();
+  const leaveBalanceB = randomUUID();
+  const leaveRequestA = randomUUID();
+  const leaveRequestB = randomUUID();
+  const overtimeA = randomUUID();
+  const overtimeB = randomUUID();
+  const delegationA = randomUUID();
+  const delegationB = randomUUID();
+  const delegateA = randomUUID();
+  const delegateB = randomUUID();
+  const summaryA = randomUUID();
+  const summaryB = randomUUID();
   const emailA = `${tenantA}@isolation.test`;
   const emailB = `${tenantB}@isolation.test`;
 
@@ -860,6 +907,87 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       [proposalA, proposalB, tenantA, tenantB, conversationA, conversationB, userA, userB],
     );
     await superuser.query(
+      `INSERT INTO att_shifts (
+         id, tenant_id, code, name, start_local_time, end_local_time, workweek_type
+       ) VALUES
+         ($1, $3, 'PAGI', 'Pagi', '08:00', '17:00', '5_day'),
+         ($2, $4, 'PAGI', 'Pagi', '08:00', '17:00', '5_day')`,
+      [shiftA, shiftB, tenantA, tenantB],
+    );
+    await superuser.query(
+      `INSERT INTO att_rosters (id, tenant_id, employee_id, shift_id, work_date) VALUES
+         ($1, $3, $5, $7, '2026-02-02'),
+         ($2, $4, $6, $8, '2026-02-02')`,
+      [rosterA, rosterB, tenantA, tenantB, employeeA, employeeB, shiftA, shiftB],
+    );
+    await superuser.query(
+      `INSERT INTO att_holidays (
+         id, tenant_id, holiday_date, name, kind, source_status, calendar_year
+       ) VALUES
+         ($1, $3, '2026-08-17', 'Kemerdekaan', 'national', 'draft', 2026),
+         ($2, $4, '2026-08-17', 'Kemerdekaan', 'national', 'draft', 2026)`,
+      [holidayA, holidayB, tenantA, tenantB],
+    );
+    await superuser.query(
+      `INSERT INTO att_leave_types (
+         id, tenant_id, code, name, tenure_months, entitlement_days, deducts_annual, deduction_toggle
+       ) VALUES
+         ($1, $3, 'cuti_tahunan', 'Cuti Tahunan', 12, 12, false, false),
+         ($2, $4, 'cuti_tahunan', 'Cuti Tahunan', 12, 12, false, false)`,
+      [leaveTypeA, leaveTypeB, tenantA, tenantB],
+    );
+    await superuser.query(
+      `INSERT INTO att_leave_balances (
+         id, tenant_id, employee_id, leave_type_id, balance_year, entitled_days, used_days
+       ) VALUES
+         ($1, $3, $5, $7, 2026, 12, 0),
+         ($2, $4, $6, $8, 2026, 12, 0)`,
+      [leaveBalanceA, leaveBalanceB, tenantA, tenantB, employeeA, employeeB, leaveTypeA, leaveTypeB],
+    );
+    await superuser.query(
+      `INSERT INTO att_leave_requests (
+         id, tenant_id, employee_id, leave_type_id, start_date, end_date, day_count,
+         status, requested_by_user_id
+       ) VALUES
+         ($1, $3, $5, $7, '2026-02-02', '2026-02-02', 1, 'pending_line_manager', $9),
+         ($2, $4, $6, $8, '2026-02-02', '2026-02-02', 1, 'pending_line_manager', $10)`,
+      [
+        leaveRequestA,
+        leaveRequestB,
+        tenantA,
+        tenantB,
+        employeeA,
+        employeeB,
+        leaveTypeA,
+        leaveTypeB,
+        userA,
+        userB,
+      ],
+    );
+    await superuser.query(
+      `INSERT INTO att_overtime_requests (
+         id, tenant_id, employee_id, work_date, starts_at, ends_at, workweek_type, day_type,
+         requested_minutes, status, requested_by_user_id
+       ) VALUES
+         ($1, $3, $5, '2026-02-02', '2026-02-02T01:00:00Z', '2026-02-02T02:00:00Z', '5_day', 'workday', 60, 'pending_line_manager', $7),
+         ($2, $4, $6, '2026-02-02', '2026-02-02T01:00:00Z', '2026-02-02T02:00:00Z', '5_day', 'workday', 60, 'pending_line_manager', $8)`,
+      [overtimeA, overtimeB, tenantA, tenantB, employeeA, employeeB, userA, userB],
+    );
+    await superuser.query(
+      `INSERT INTO att_approval_delegations (
+         id, tenant_id, delegator_user_id, delegate_user_id, role_code, starts_at, ends_at
+       ) VALUES
+         ($1, $3, $5, $7, 'line_manager', now(), now() + interval '1 day'),
+         ($2, $4, $6, $8, 'line_manager', now(), now() + interval '1 day')`,
+      [delegationA, delegationB, tenantA, tenantB, userA, userB, delegateA, delegateB],
+    );
+    await superuser.query(
+      `INSERT INTO att_daily_summaries (id, tenant_id, employee_id, work_date, status) VALUES
+         ($1, $3, $5, '2026-02-02', 'open'),
+         ($2, $4, $6, '2026-02-02', 'open')`,
+      [summaryA, summaryB, tenantA, tenantB, employeeA, employeeB],
+    );
+    await superuser.query(
       `INSERT INTO ai_knowledge_chunks (
          id, tenant_id, source_type, citation_ref, title, content, is_statute_text, document_id, chunk_index
        ) VALUES
@@ -888,7 +1016,16 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["ai_conversations", { a: conversationA, b: conversationB }],
       ["ai_knowledge_chunks", { a: chunkA, b: chunkB }],
       ["ai_messages", { a: messageA, b: messageB }],
+      ["att_approval_delegations", { a: delegationA, b: delegationB }],
+      ["att_daily_summaries", { a: summaryA, b: summaryB }],
+      ["att_holidays", { a: holidayA, b: holidayB }],
+      ["att_leave_balances", { a: leaveBalanceA, b: leaveBalanceB }],
+      ["att_leave_requests", { a: leaveRequestA, b: leaveRequestB }],
+      ["att_leave_types", { a: leaveTypeA, b: leaveTypeB }],
+      ["att_overtime_requests", { a: overtimeA, b: overtimeB }],
+      ["att_rosters", { a: rosterA, b: rosterB }],
       ["att_secret", { a: attA, b: attB }],
+      ["att_shifts", { a: shiftA, b: shiftB }],
       ["aud_events", { a: eventA, b: eventB }],
       ["aud_outbox_events", { a: outboxA, b: outboxB }],
       ["aud_pii_access_logs", { a: piiA, b: piiB }],
@@ -913,6 +1050,15 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
 
 async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   const tenants = [seed.tenantA, seed.tenantB];
+  await superuser.query("DELETE FROM att_rosters WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_leave_requests WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_leave_balances WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_overtime_requests WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_daily_summaries WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_holidays WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_approval_delegations WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_leave_types WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM att_shifts WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_knowledge_chunks WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_messages WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_action_proposals WHERE tenant_id = ANY($1::uuid[])", [tenants]);
