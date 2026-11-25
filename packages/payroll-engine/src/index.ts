@@ -27,8 +27,13 @@ export type {
 } from "./pph21/reconcile.ts";
 export { terRate, terTax } from "./pph21/ter.ts";
 export { jpAnnualWageCap } from "./tables/caps.ts";
-export { id2026DraftTable } from "./tables/draft-2026.ts";
 export { parseStatutoryTable } from "./tables/parse.ts";
-export { assertTableCovers, findTableForDate, isStatutoryDeclared } from "./tables/select.ts";
+export {
+  assertReadyForCalculation,
+  assertTableCovers,
+  findTableForDate,
+  isStatutoryDeclared,
+} from "./tables/select.ts";
+export type { CalculationTableOptions } from "./tables/select.ts";
 export { terCategories } from "./tables/types.ts";
 export type { StatutoryTable, TerCategory } from "./tables/types.ts";

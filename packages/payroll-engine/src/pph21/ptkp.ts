@@ -30,7 +30,7 @@ export function terCategoryForPtkp(status: PtkpStatus): TerCategory {
 export function annualPtkp(table: StatutoryTable, status: PtkpStatus): Idr {
   terCategoryForPtkp(status);
   const entry = table.ptkpAnnual.amounts[status];
-  if (table.ptkpAnnual.source === "missing" || entry.source === "missing" || entry.rupiah === null) {
+  if (table.ptkpAnnual.source === "missing" || entry.kind !== "present") {
     throw new MissingStatutoryValueError(`ptkp_annual.${status}`);
   }
   return rupiah(entry.rupiah);

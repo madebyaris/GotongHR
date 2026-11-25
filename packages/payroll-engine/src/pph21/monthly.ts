@@ -41,6 +41,7 @@ function zero(): Idr {
  * gross: the employee bears the tax.
  * gross_up: a tax allowance is added until it matches the tax within Rp1.
  * nett: the agreed components are the employee's net, and the employer bears the tax.
+ * Nett grossed cost is that net plus the tax, including a Rp1 solver gap.
  * December and exit months use reconcilePph21. This function does not read the clock.
  */
 export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Result {
@@ -106,7 +107,7 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
     tax,
     employeeWithheld: zero(),
     employerBorneTax: tax,
-    grossedCost: grossedTaxable,
+    grossedCost: rupiah(grossTaxable + solved.tax),
     iterations: solved.iterations,
   };
 }

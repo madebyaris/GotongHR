@@ -11,10 +11,29 @@ export function assertTableCovers(table: StatutoryTable, payrollDate: CivilDate)
   }
 }
 
+export interface CalculationTableOptions {
+  readonly allowUndeclared?: boolean;
+}
+
+/**
+ * A draft table is for inspection. Payroll math uses it only when the caller opts in.
+ * Published fixtures stay usable so tests can run a labeled stand-in.
+ */
+export function assertReadyForCalculation(
+  table: StatutoryTable,
+  options?: CalculationTableOptions,
+): void {
+  if (table.status !== "draft" || options?.allowUndeclared === true) return;
+  throw new PayrollInputError(
+    "A draft statutory table is not used for calculation. Pass allowUndeclared to inspect it.",
+  );
+}
+
 /** Picks the single table whose effective window contains the injected date. */
 export function findTableForDate(
   tables: readonly StatutoryTable[],
   payrollDate: CivilDate,
+  options?: CalculationTableOptions,
 ): StatutoryTable {
   if (!Array.isArray(tables)) {
     throw new PayrollInputError("Statutory tables must be an array.");
@@ -24,23 +43,23 @@ export function findTableForDate(
   const match = matches[0];
   if (match === undefined) throw new PayrollInputError(`No statutory table covers ${iso}.`);
   if (matches.length > 1) throw new PayrollInputError(`Overlapping statutory tables cover ${iso}.`);
+  assertReadyForCalculation(match, options);
   return match;
 }
 
 /**
- * True only for a published non-fixture table whose TER rates and PTKP amounts are present.
+ * True only for a published non-fixture table whose TER rates, PTKP amounts, and JP cap are present.
  * Draft files and synthetic fixtures stay false so golden checks do not treat them as the law.
  */
 export function isStatutoryDeclared(table: StatutoryTable): boolean {
   if (table.fixture === "synthetic" || table.status !== "published") return false;
   if (table.ter.source === "missing" || table.ptkpAnnual.source === "missing") return false;
+  if (table.jpAnnualWageCap.kind !== "present") return false;
   for (const category of terCategories) {
-    const entry = table.ter.categories[category];
-    if (entry.source === "missing" || entry.brackets === null) return false;
+    if (table.ter.categories[category].kind !== "present") return false;
   }
   for (const status of ptkpStatuses) {
-    const amount = table.ptkpAnnual.amounts[status];
-    if (amount.source === "missing" || amount.rupiah === null) return false;
+    if (table.ptkpAnnual.amounts[status].kind !== "present") return false;
   }
   return true;
 }

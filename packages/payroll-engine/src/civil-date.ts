@@ -55,7 +55,7 @@ export function isIsoDate(value: unknown): value is string {
 }
 
 export function civilDateFromIso(value: string): CivilDate {
-  if (!isIsoDate(value)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new PayrollInputError("Payroll date must be YYYY-MM-DD.");
   }
   return civilDate(digits(value.slice(0, 4)), digits(value.slice(5, 7)), digits(value.slice(8, 10)));

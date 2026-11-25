@@ -1,5 +1,5 @@
 import { ptkpStatuses, type PtkpStatus, type TaxMethod } from "@gotonghr/contracts";
-import { civilDateFromIso, type CivilDate } from "../civil-date.ts";
+import { civilDateFromIso, isIsoDate, type CivilDate } from "../civil-date.ts";
 import { GoldenCaseMismatchError, InvalidStatutoryTableError } from "../errors.ts";
 import { rupiah } from "../money.ts";
 import type { StatutoryTable } from "../tables/types.ts";
@@ -138,19 +138,26 @@ function same(caseId: string, field: string, expected: bigint, actual: bigint): 
   if (expected !== actual) throw new GoldenCaseMismatchError(caseId, field, expected, actual);
 }
 
-function parseCase(value: unknown, index: number): GoldenCase | null {
+function parseCase(value: unknown, index: number, seenIds: Set<string>): GoldenCase | null {
   const path = `cases.${index}`;
   const record = asRecord(value, path);
+  const id = parseId(requireKey(record, "id", path), `${path}.id`);
+  if (seenIds.has(id)) {
+    throw new InvalidStatutoryTableError(`${path}.id duplicates ${id}.`);
+  }
+  seenIds.add(id);
   const verified = requireKey(record, "verified", path);
   if (verified !== true) {
     if (verified !== false) throw new InvalidStatutoryTableError(`${path}.verified must be boolean.`);
     return null;
   }
-  const id = parseId(requireKey(record, "id", path), `${path}.id`);
   const operation = requireKey(record, "operation", path);
   const payrollDateValue = requireKey(record, "payroll_date", path);
-  if (typeof payrollDateValue !== "string") {
+  if (typeof payrollDateValue !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(payrollDateValue)) {
     throw new InvalidStatutoryTableError(`${path}.payroll_date must be YYYY-MM-DD.`);
+  }
+  if (!isIsoDate(payrollDateValue)) {
+    throw new InvalidStatutoryTableError(`${path}.payroll_date must be a real calendar date.`);
   }
   const payrollDate = civilDateFromIso(payrollDateValue);
   const ptkpStatus = parseStatus(requireKey(record, "ptkp_status", path), `${path}.ptkp_status`);
@@ -224,8 +231,13 @@ function parseCase(value: unknown, index: number): GoldenCase | null {
       throw new InvalidStatutoryTableError(`${path}.reason must be december or exit.`);
     }
     const activeMonths = requireKey(record, "active_months", path);
-    if (typeof activeMonths !== "number" || !Number.isInteger(activeMonths)) {
-      throw new InvalidStatutoryTableError(`${path}.active_months must be an integer.`);
+    if (
+      typeof activeMonths !== "number" ||
+      !Number.isInteger(activeMonths) ||
+      activeMonths < 1 ||
+      activeMonths > 12
+    ) {
+      throw new InvalidStatutoryTableError(`${path}.active_months must be an integer from 1 to 12.`);
     }
     const expected = asRecord(requireKey(record, "expected", path), `${path}.expected`);
     rejectUnknown(
@@ -280,8 +292,9 @@ export function parseGoldenFile(input: unknown): GoldenFile {
   const casesValue = requireKey(record, "cases", "golden");
   if (!Array.isArray(casesValue)) throw new InvalidStatutoryTableError("golden.cases must be an array.");
   const cases: GoldenCase[] = [];
+  const seenIds = new Set<string>();
   for (let index = 0; index < casesValue.length; index += 1) {
-    const parsed = parseCase(casesValue[index], index);
+    const parsed = parseCase(casesValue[index], index, seenIds);
     if (parsed !== null) cases.push(parsed);
   }
   return { description, cases };

@@ -222,8 +222,9 @@ function independentPkp(
   const biaya = rawBiaya < cap ? rawBiaya : cap;
   let neto = ytd - biaya - jht - jp - zakat;
   if (neto < 0n) neto = 0n;
-  const ptkp = table.ptkpAnnual.amounts[status].rupiah;
-  if (ptkp === null) throw new Error("Synthetic PTKP is missing.");
+  const amount = table.ptkpAnnual.amounts[status];
+  if (amount.kind !== "present") throw new Error("Synthetic PTKP is missing.");
+  const ptkp = amount.rupiah;
   let raw = neto - ptkp;
   if (raw < 0n) raw = 0n;
   return raw - (raw % 1000n);

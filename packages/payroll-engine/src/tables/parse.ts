@@ -1,6 +1,7 @@
 import { ptkpStatuses, type PtkpStatus } from "@gotonghr/contracts";
 import { isIsoDate } from "../civil-date.ts";
 import { InvalidStatutoryTableError } from "../errors.ts";
+import { MAX_TER_BRACKETS } from "./limits.ts";
 import {
   terCategories,
   type Pasal17Band,
@@ -12,7 +13,6 @@ import {
 } from "./types.ts";
 
 const PKP_STEP = 1000n;
-const MAX_BRACKETS = 80;
 const MAX_PASAL17_BANDS = 20;
 
 function invalid(message: string): never {
@@ -41,9 +41,12 @@ function requireKey(record: Record<string, unknown>, key: string, path: string):
   return record[key];
 }
 
-function parseSource(value: unknown, path: string): string {
+function parseSource(value: unknown, path: string, fixture: "synthetic" | null): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$/.test(value)) {
     invalid(`${path} must be a short source label.`);
+  }
+  if (value === "synthetic" && fixture !== "synthetic") {
+    invalid(`${path} cannot be synthetic unless the table is a labeled fixture.`);
   }
   return value;
 }
@@ -101,10 +104,11 @@ function parseFixture(record: Record<string, unknown>): "synthetic" | null {
   return "synthetic";
 }
 
-function parsePasal17(value: unknown): StatutoryTable["pasal17"] {
+function parsePasal17(value: unknown, fixture: "synthetic" | null): StatutoryTable["pasal17"] {
   const record = asRecord(value, "pasal17");
   rejectUnknown(record, ["source", "pkp_round_down_to", "bands"], "pasal17");
-  const source = parseSource(requireKey(record, "source", "pasal17"), "pasal17.source");
+  const source = parseSource(requireKey(record, "source", "pasal17"), "pasal17.source", fixture);
+  if (source === "missing") invalid("pasal17.source cannot be missing.");
   const step = parseRupiah(requireKey(record, "pkp_round_down_to", "pasal17"), "pasal17.pkp_round_down_to");
   if (step !== PKP_STEP) invalid("pasal17.pkp_round_down_to must be 1000.");
   const bandsValue = requireKey(record, "bands", "pasal17");
@@ -113,6 +117,8 @@ function parsePasal17(value: unknown): StatutoryTable["pasal17"] {
   }
   const bands: Pasal17Band[] = [];
   let previousUpTo: bigint | null = null;
+  let previousPerScale: bigint | null = null;
+  let previousScale: bigint | null = null;
   for (let index = 0; index < bandsValue.length; index += 1) {
     const path = `pasal17.bands.${index}`;
     const entry = asRecord(bandsValue[index], path);
@@ -122,6 +128,16 @@ function parsePasal17(value: unknown): StatutoryTable["pasal17"] {
     if (rateScale <= 0n || rateScale > 1_000_000n) invalid(`${path}.rate_scale is outside the allowed range.`);
     const ratePerScale = parseSmallInt(requireKey(entry, "rate_per_scale", path), `${path}.rate_per_scale`);
     if (ratePerScale > rateScale) invalid(`${path}.rate_per_scale cannot exceed its scale.`);
+    if ((PKP_STEP * ratePerScale) % rateScale !== 0n) {
+      invalid(`${path} must produce a whole rupiah on each Rp1,000 of PKP.`);
+    }
+    if (
+      previousPerScale !== null &&
+      previousScale !== null &&
+      ratePerScale * previousScale < previousPerScale * rateScale
+    ) {
+      invalid("pasal17.bands rates must not decrease as PKP rises.");
+    }
     const isLast = index === bandsValue.length - 1;
     if (isLast && upTo !== null) invalid("pasal17.bands must end with an open band.");
     if (!isLast && upTo === null) invalid(`${path}.up_to cannot be open before the last band.`);
@@ -130,19 +146,22 @@ function parsePasal17(value: unknown): StatutoryTable["pasal17"] {
       if (previousUpTo !== null && upTo <= previousUpTo) invalid(`${path}.up_to must increase.`);
       previousUpTo = upTo;
     }
+    previousPerScale = ratePerScale;
+    previousScale = rateScale;
     bands.push({ upTo, ratePerScale, rateScale });
   }
   return { source, pkpRoundDownTo: step, bands };
 }
 
-function parseBiaya(value: unknown): StatutoryTable["biayaJabatan"] {
+function parseBiaya(value: unknown, fixture: "synthetic" | null): StatutoryTable["biayaJabatan"] {
   const record = asRecord(value, "biaya_jabatan");
   rejectUnknown(
     record,
     ["source", "rate_per_scale", "rate_scale", "rounding", "monthly_cap"],
     "biaya_jabatan",
   );
-  const source = parseSource(requireKey(record, "source", "biaya_jabatan"), "biaya_jabatan.source");
+  const source = parseSource(requireKey(record, "source", "biaya_jabatan"), "biaya_jabatan.source", fixture);
+  if (source === "missing") invalid("biaya_jabatan.source cannot be missing.");
   if (record.rounding !== "floor") {
     invalid("biaya_jabatan.rounding must be floor until a verified example changes it.");
   }
@@ -157,28 +176,34 @@ function parseBiaya(value: unknown): StatutoryTable["biayaJabatan"] {
   return { source, ratePerScale, rateScale, rounding: "floor", monthlyCap };
 }
 
-function parseSourcedAmount(value: unknown, path: string, parentMissing: boolean): SourcedAmount {
+function parseSourcedAmount(
+  value: unknown,
+  path: string,
+  parentMissing: boolean,
+  fixture: "synthetic" | null,
+): SourcedAmount {
   const record = asRecord(value, path);
-  const source = parseSource(requireKey(record, "source", path), `${path}.source`);
+  const source = parseSource(requireKey(record, "source", path), `${path}.source`, fixture);
   if (parentMissing) {
     if (source !== "missing" || Object.hasOwn(record, "rupiah")) {
       invalid(`${path} must be missing and must not include rupiah.`);
     }
     rejectUnknown(record, ["source"], path);
-    return { source: "missing", rupiah: null };
+    return { kind: "missing" };
   }
   if (source === "missing") invalid(`${path}.source must not be missing when the parent source is present.`);
   rejectUnknown(record, ["source", "rupiah"], path);
   return {
+    kind: "present",
     source,
     rupiah: parseRupiah(requireKey(record, "rupiah", path), `${path}.rupiah`),
   };
 }
 
-function parsePtkp(value: unknown): StatutoryTable["ptkpAnnual"] {
+function parsePtkp(value: unknown, fixture: "synthetic" | null): StatutoryTable["ptkpAnnual"] {
   const record = asRecord(value, "ptkp_annual");
   rejectUnknown(record, ["source", "amounts"], "ptkp_annual");
-  const source = parseSource(requireKey(record, "source", "ptkp_annual"), "ptkp_annual.source");
+  const source = parseSource(requireKey(record, "source", "ptkp_annual"), "ptkp_annual.source", fixture);
   const amountsRecord = asRecord(requireKey(record, "amounts", "ptkp_annual"), "ptkp_annual.amounts");
   rejectUnknown(amountsRecord, ptkpStatuses, "ptkp_annual.amounts");
   const amounts = {} as Record<PtkpStatus, SourcedAmount>;
@@ -187,14 +212,15 @@ function parsePtkp(value: unknown): StatutoryTable["ptkpAnnual"] {
       requireKey(amountsRecord, status, "ptkp_annual.amounts"),
       `ptkp_annual.amounts.${status}`,
       source === "missing",
+      fixture,
     );
   }
   return { source, amounts };
 }
 
 function parseTerBrackets(value: unknown, path: string, rateScale: bigint): TerBracket[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_BRACKETS) {
-    invalid(`${path} must contain between 1 and ${MAX_BRACKETS} brackets.`);
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TER_BRACKETS) {
+    invalid(`${path} must contain between 1 and ${MAX_TER_BRACKETS} brackets.`);
   }
   const brackets: TerBracket[] = [];
   let previousUpTo: bigint | null = null;
@@ -232,29 +258,31 @@ function parseTerCategory(
   category: TerCategory,
   parentMissing: boolean,
   rateScale: bigint,
+  fixture: "synthetic" | null,
 ): TerCategoryTable {
   const path = `ter.categories.${category}`;
   const record = asRecord(value, path);
-  const source = parseSource(requireKey(record, "source", path), `${path}.source`);
+  const source = parseSource(requireKey(record, "source", path), `${path}.source`, fixture);
   if (parentMissing) {
     if (source !== "missing" || Object.hasOwn(record, "brackets")) {
       invalid(`${path} must be missing and must not include brackets.`);
     }
     rejectUnknown(record, ["source"], path);
-    return { source: "missing", brackets: null };
+    return { kind: "missing" };
   }
   if (source === "missing") invalid(`${path}.source must not be missing when ter.source is present.`);
   rejectUnknown(record, ["source", "brackets"], path);
   return {
+    kind: "present",
     source,
     brackets: parseTerBrackets(requireKey(record, "brackets", path), `${path}.brackets`, rateScale),
   };
 }
 
-function parseTer(value: unknown): StatutoryTable["ter"] {
+function parseTer(value: unknown, fixture: "synthetic" | null): StatutoryTable["ter"] {
   const record = asRecord(value, "ter");
   rejectUnknown(record, ["source", "tax_rounding", "rate_scale", "categories"], "ter");
-  const source = parseSource(requireKey(record, "source", "ter"), "ter.source");
+  const source = parseSource(requireKey(record, "source", "ter"), "ter.source", fixture);
   if (record.tax_rounding !== "half_up") {
     invalid("ter.tax_rounding must be half_up until a verified example changes it.");
   }
@@ -269,21 +297,27 @@ function parseTer(value: unknown): StatutoryTable["ter"] {
       category,
       source === "missing",
       rateScale,
+      fixture,
     );
   }
   return { source, taxRounding: "half_up", rateScale, categories };
 }
 
-function parseJp(value: unknown): SourcedAmount {
+function parseJp(value: unknown, fixture: "synthetic" | null): SourcedAmount {
   const record = asRecord(value, "jp_annual_wage_cap");
-  const source = parseSource(requireKey(record, "source", "jp_annual_wage_cap"), "jp_annual_wage_cap.source");
+  const source = parseSource(
+    requireKey(record, "source", "jp_annual_wage_cap"),
+    "jp_annual_wage_cap.source",
+    fixture,
+  );
   if (source === "missing") {
     if (Object.hasOwn(record, "rupiah")) invalid("jp_annual_wage_cap must not include rupiah while it is missing.");
     rejectUnknown(record, ["source"], "jp_annual_wage_cap");
-    return { source: "missing", rupiah: null };
+    return { kind: "missing" };
   }
   rejectUnknown(record, ["source", "rupiah"], "jp_annual_wage_cap");
   return {
+    kind: "present",
     source,
     rupiah: parseRupiah(requireKey(record, "rupiah", "jp_annual_wage_cap"), "jp_annual_wage_cap.rupiah"),
   };
@@ -322,11 +356,11 @@ export function parseStatutoryTable(input: unknown): StatutoryTable {
     fixture,
     effectiveFrom,
     effectiveTo,
-    pasal17: parsePasal17(requireKey(record, "pasal17", "table")),
-    biayaJabatan: parseBiaya(requireKey(record, "biaya_jabatan", "table")),
-    ptkpAnnual: parsePtkp(requireKey(record, "ptkp_annual", "table")),
-    ter: parseTer(requireKey(record, "ter", "table")),
-    jpAnnualWageCap: parseJp(requireKey(record, "jp_annual_wage_cap", "table")),
+    pasal17: parsePasal17(requireKey(record, "pasal17", "table"), fixture),
+    biayaJabatan: parseBiaya(requireKey(record, "biaya_jabatan", "table"), fixture),
+    ptkpAnnual: parsePtkp(requireKey(record, "ptkp_annual", "table"), fixture),
+    ter: parseTer(requireKey(record, "ter", "table"), fixture),
+    jpAnnualWageCap: parseJp(requireKey(record, "jp_annual_wage_cap", "table"), fixture),
   };
   return deepFreeze(table);
 }

@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./draft": {
+      "types": "./dist/tables/draft-2026.d.ts",
+      "import": "./dist/tables/draft-2026.js"
     }
   },
   "scripts": {

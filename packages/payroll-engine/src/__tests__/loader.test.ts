@@ -5,12 +5,22 @@ import test from "node:test";
 import {
   InvalidStatutoryTableError,
   findTableForDate,
-  id2026DraftTable,
   isStatutoryDeclared,
   jpAnnualWageCap,
   parseStatutoryTable,
 } from "../index.ts";
+import { id2026DraftTable } from "../tables/draft-2026.ts";
 import { loadSyntheticFixture, readJson } from "./fixture-table.ts";
+
+function labelSources(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(labelSources);
+  if (typeof value !== "object" || value === null) return value;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    next[key] = key === "source" && child === "synthetic" ? "worked-example" : labelSources(child);
+  }
+  return next;
+}
 
 test("the 2026 draft parses and stays inside its effective window", () => {
   assert.equal(id2026DraftTable.status, "draft");
@@ -44,9 +54,17 @@ test("a published non-fixture table with rates is declared present", () => {
   delete copy.not_official;
   delete copy.note;
   copy.status = "published";
-  assert.equal(isStatutoryDeclared(parseStatutoryTable(copy)), true);
-  copy.status = "draft";
-  assert.equal(isStatutoryDeclared(parseStatutoryTable(copy)), false);
+  assert.throws(() => parseStatutoryTable(copy), /cannot be synthetic/);
+
+  const labeled = labelSources(copy) as Record<string, unknown>;
+  assert.equal(isStatutoryDeclared(parseStatutoryTable(labeled)), true);
+  labeled.status = "draft";
+  assert.equal(isStatutoryDeclared(parseStatutoryTable(labeled)), false);
+
+  const missingJp = structuredClone(labeled) as Record<string, unknown>;
+  missingJp.status = "published";
+  missingJp.jp_annual_wage_cap = { source: "missing" };
+  assert.equal(isStatutoryDeclared(parseStatutoryTable(missingJp)), false);
 });
 
 test("the JP cap on the synthetic fixture is the labeled stand-in, not a guessed statute", () => {
@@ -70,6 +88,14 @@ test("findTableForDate uses the injected date and rejects overlap or a gap", () 
   assert.throws(
     () => findTableForDate([current, current], { year: 2026, month: 6, day: 1 }),
     /Overlapping statutory tables/,
+  );
+  assert.throws(
+    () => findTableForDate([id2026DraftTable], { year: 2026, month: 6, day: 15 }),
+    /draft statutory table/,
+  );
+  assert.equal(
+    findTableForDate([id2026DraftTable], { year: 2026, month: 6, day: 15 }, { allowUndeclared: true }),
+    id2026DraftTable,
   );
 });
 
@@ -130,9 +156,40 @@ test("the loader rejects decreasing TER rates and money typed as a JSON number",
   assert.throws(() => parseStatutoryTable(money), /integer string/);
 });
 
+test("the loader rejects a missing statutory source, a decreasing Pasal 17 rate, and an inexact rupiah", () => {
+  const missingPasal = structuredClone(readJson("../tables/id-2026.draft.json")) as {
+    pasal17: { source: string };
+  };
+  missingPasal.pasal17.source = "missing";
+  assert.throws(() => parseStatutoryTable(missingPasal), /pasal17.source cannot be missing/);
+
+  const missingBiaya = structuredClone(readJson("../tables/id-2026.draft.json")) as {
+    biaya_jabatan: { source: string };
+  };
+  missingBiaya.biaya_jabatan.source = "missing";
+  assert.throws(() => parseStatutoryTable(missingBiaya), /biaya_jabatan.source cannot be missing/);
+
+  const decreasing = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as {
+    pasal17: { bands: Array<{ rate_per_scale: number }> };
+  };
+  const lower = decreasing.pasal17.bands[1];
+  assert.ok(lower);
+  lower.rate_per_scale = 100;
+  assert.throws(() => parseStatutoryTable(decreasing), /must not decrease/);
+
+  const inexact = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as {
+    pasal17: { bands: Array<{ rate_per_scale: number; rate_scale: number }> };
+  };
+  const first = inexact.pasal17.bands[0];
+  assert.ok(first);
+  first.rate_per_scale = 1;
+  first.rate_scale = 3;
+  assert.throws(() => parseStatutoryTable(inexact), /whole rupiah/);
+});
+
 test("the shipped draft file is the one the package exports", () => {
   const raw = JSON.parse(
     readFileSync(fileURLToPath(new URL("../tables/id-2026.draft.json", import.meta.url)), "utf8"),
   );
-  assert.deepEqual(parseStatutoryTable(raw).pasal17.bands, id2026DraftTable.pasal17.bands);
+  assert.deepEqual(parseStatutoryTable(raw), id2026DraftTable);
 });

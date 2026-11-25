@@ -17,19 +17,17 @@ export interface TerBracket {
   readonly ratePerScale: bigint;
 }
 
-export interface SourcedAmount {
-  readonly source: string;
-  readonly rupiah: bigint | null;
-}
+export type SourcedAmount =
+  | { readonly kind: "missing" }
+  | { readonly kind: "present"; readonly source: string; readonly rupiah: bigint };
 
-export interface TerCategoryTable {
-  readonly source: string;
-  readonly brackets: readonly TerBracket[] | null;
-}
+export type TerCategoryTable =
+  | { readonly kind: "missing" }
+  | { readonly kind: "present"; readonly source: string; readonly brackets: readonly TerBracket[] };
 
 /**
  * Effective-dated PPh 21 rules.
- * Money fields are bigint rupiah. A source of "missing" has no numeric stand-in.
+ * Money fields are bigint rupiah. A missing amount or TER category has no numeric stand-in.
  */
 export interface StatutoryTable {
   readonly schemaVersion: 1;

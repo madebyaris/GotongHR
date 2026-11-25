@@ -22,6 +22,11 @@ export function pasal17Tax(table: StatutoryTable, pkp: bigint): Idr {
   if (pkp % 1000n !== 0n) {
     throw new PayrollInputError("PKP must already be rounded down to Rp1,000.");
   }
+  const bands = table.pasal17.bands;
+  const last = bands[bands.length - 1];
+  if (last === undefined || last.upTo !== null) {
+    throw new PayrollInputError("Pasal 17 bands must be non-empty and end with an open band.");
+  }
   let tax = 0n;
   let lower = 0n;
   for (const band of table.pasal17.bands) {

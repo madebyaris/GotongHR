@@ -53,6 +53,12 @@ export function reconcilePph21(input: ReconcilePph21Input): ReconcilePph21Result
   if (input.reason === "december" && payrollDate.month !== 12) {
     throw new PayrollInputError("December reconciliation requires a December payroll date.");
   }
+  if (!Number.isInteger(input.activeMonths) || input.activeMonths < 1 || input.activeMonths > 12) {
+    throw new PayrollInputError("activeMonths must be an integer from 1 to 12.");
+  }
+  if (input.activeMonths > payrollDate.month) {
+    throw new PayrollInputError("activeMonths cannot exceed the payroll month.");
+  }
   assertTableCovers(input.table, payrollDate);
   const category = terCategoryForPtkp(input.ptkpStatus);
   const ytdGross = nonNegativeRupiah(input.ytdGrossTaxable, "ytdGrossTaxable");

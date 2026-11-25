@@ -22,7 +22,7 @@ export function terRate(
 ): TerRate {
   assertGross(grossTaxable);
   const entry = table.ter.categories[category];
-  if (table.ter.source === "missing" || entry.source === "missing" || entry.brackets === null) {
+  if (table.ter.source === "missing" || entry.kind !== "present") {
     throw new MissingStatutoryValueError(`ter.${category}`);
   }
   for (const bracket of entry.brackets) {

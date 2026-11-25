@@ -5,7 +5,7 @@
   "effective_from": "2026-01-01",
   "effective_to": "2026-12-31",
   "pasal17": {
-    "source": "architecture-spec",
+    "source": "uu-hpp-pasal-17",
     "pkp_round_down_to": "1000",
     "bands": [
       { "up_to": "60000000", "rate_per_scale": 500, "rate_scale": 10000 },
@@ -16,7 +16,7 @@
     ]
   },
   "biaya_jabatan": {
-    "source": "architecture-spec",
+    "source": "pmk-biaya-jabatan",
     "rate_per_scale": 500,
     "rate_scale": 10000,
     "rounding": "floor",

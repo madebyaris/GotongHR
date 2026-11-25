@@ -150,6 +150,15 @@ test("exit and December use the same money result for the same inputs", () => {
       }),
     PayrollInputError,
   );
+  assert.throws(
+    () =>
+      reconcilePph21({
+        ...input,
+        payrollDate: civilDate(2026, 6, 30),
+        reason: "exit",
+      }),
+    /activeMonths cannot exceed/,
+  );
 });
 
 test("reconciliation does not need TER rates and does not cap JP with a guessed number", () => {
@@ -171,13 +180,13 @@ test("reconciliation does not need TER rates and does not cap JP with a guessed 
     table: parseStatutoryTable(raw),
     ptkpStatus: "TK/0",
     activeMonths: 6,
-    ytdGrossTaxable: rupiah(30_000_000n),
+    ytdGrossTaxable: rupiah(60_000_000n),
     ytdEmployeeJht: rupiah(0n),
     ytdEmployeeJp: rupiah(40_000_000n),
     verifiedZakat: rupiah(0n),
     ytdPph21Withheld: rupiah(0n),
   });
-  assert.equal(result.neto, 0n);
-  assert.equal(result.pkp, 0n);
-  assert.equal(result.annualTax, 0n);
+  assert.equal(result.neto, 17_000_000n);
+  assert.equal(result.pkp, 16_000_000n);
+  assert.equal(result.annualTax, 800_000n);
 });

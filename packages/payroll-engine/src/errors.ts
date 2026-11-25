@@ -26,8 +26,8 @@ export class MissingStatutoryValueError extends Error {
 }
 
 export class GrossUpDidNotConvergeError extends Error {
-  constructor() {
-    super("Gross-up did not converge within 10 iterations.");
+  constructor(message: string) {
+    super(message);
     this.name = "GrossUpDidNotConvergeError";
   }
 }

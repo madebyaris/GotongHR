@@ -10,6 +10,7 @@ import {
   terTax,
 } from "../index.ts";
 import { GROSS_UP_MAX_ITERATIONS, solveGrossUp } from "../pph21/gross-up.ts";
+import { MAX_TER_BRACKETS } from "../tables/limits.ts";
 import { components, loadSyntheticFixture, readJson } from "./fixture-table.ts";
 
 const table = loadSyntheticFixture();
@@ -139,6 +140,7 @@ test("nett returns the employer-borne tax and the grossed cost", () => {
   assert.equal(result.employerBorneTax, 102_041n);
   assert.equal(result.grossedCost, 5_102_041n);
   assert.equal(result.tax, 102_041n);
+  assert.equal(result.grossedCost, result.grossTaxable + result.tax);
   assert.ok(gap(result.grossedCost - result.grossTaxable, terTax(table, "A", result.grossedCost)) <= 1n);
 });
 
@@ -198,11 +200,30 @@ test("the same monthly input returns the same bigint", () => {
 });
 
 test("a 100 percent rate does not converge", () => {
-  assert.equal(GROSS_UP_MAX_ITERATIONS, 10);
+  assert.equal(GROSS_UP_MAX_ITERATIONS, MAX_TER_BRACKETS);
   assert.throws(
     () => solveGrossUp(10_000n, "half_up", () => ({ ratePerScale: 10000n, rateScale: 10000n })),
-    GrossUpDidNotConvergeError,
+    (error: unknown) => {
+      assert.ok(error instanceof GrossUpDidNotConvergeError);
+      assert.match(error.message, /ratePerScale/);
+      assert.equal(error.message.includes("10 iterations"), false);
+      return true;
+    },
   );
+});
+
+test("a fixed point found on the last gross-up iteration is kept", () => {
+  const gross = 1_000_000n;
+  const step = 1_000n;
+  const finalAllowance = step * BigInt(GROSS_UP_MAX_ITERATIONS);
+  const solved = solveGrossUp(gross, "floor", (base) => {
+    const allowance = base - gross;
+    const next = allowance < finalAllowance ? allowance + step : finalAllowance;
+    return { ratePerScale: next, rateScale: gross + next };
+  });
+  assert.equal(solved.iterations, GROSS_UP_MAX_ITERATIONS);
+  assert.equal(solved.allowance, finalAllowance);
+  assert.equal(gap(solved.allowance, solved.tax), 0n);
 });
 
 test("monthly TER does not require a PTKP rupiah amount", () => {

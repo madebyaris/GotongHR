@@ -46,13 +46,18 @@ export function applyScaledRate(
   if (typeof amount !== "bigint" || amount < 0n) {
     throw new PayrollInputError("A rate applies only to non-negative rupiah.");
   }
+  if (rounding !== "floor" && rounding !== "half_up") {
+    throw new PayrollInputError('rounding must be "floor" or "half_up".');
+  }
   if (
     typeof ratePerScale !== "bigint" ||
     ratePerScale < 0n ||
     typeof rateScale !== "bigint" ||
     rateScale <= 0n
   ) {
-    throw new PayrollInputError("A rate scale must be a positive integer.");
+    throw new PayrollInputError(
+      "ratePerScale must be a non-negative integer and rateScale must be a positive integer.",
+    );
   }
   const product = amount * ratePerScale;
   if (rounding === "floor") return product / rateScale;
