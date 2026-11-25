@@ -197,6 +197,23 @@ test("a name is cut on a character boundary", () => {
   assert.equal(file.body.includes("\uD83D,"), false);
 });
 
+test("the verifier rejects a bad BCA debit account and a mismatched transfer type", () => {
+  const bca = formatBankBatch("bca-klikbisnis", twoEmployeeBatch()).body;
+  const badDebit = verifyBankBatch("bca-klikbisnis", bca.replace("BCA_KLIKBISNIS,3333333333,", "BCA_KLIKBISNIS,12,"));
+  assert.equal(badDebit.ok, false);
+  if (!badDebit.ok) assert.equal(badDebit.reason, "The header debit account is not 8 to 18 digits.");
+  assert.equal(verifyBankBatch("bca-klikbisnis", bca.replace(",014,BCA,", ",999,BCA,")).ok, false);
+  assert.equal(verifyBankBatch("bca-klikbisnis", bca.replace(",014,BCA,", ",014,LLG,")).ok, false);
+  assert.equal(verifyBankBatch("bca-klikbisnis", bca.replace(",014,BCA,", ",999,RTGS,")).ok, true);
+  assert.equal(verifyBankBatch("bca-klikbisnis", bca.replace(",014,BCA,", ",008,BIFAST,")).ok, true);
+
+  const bni = formatBankBatch("bni-direct", twoEmployeeBatch()).body;
+  assert.equal(verifyBankBatch("bni-direct", bni.replace(",INHOUSE,009,", ",INHOUSE,008,")).ok, false);
+  assert.equal(verifyBankBatch("bni-direct", bni.replace(",INHOUSE,009,", ",SKN,009,")).ok, false);
+  assert.equal(verifyBankBatch("bni-direct", bni.replace(",INHOUSE,009,", ",RTGS,014,")).ok, true);
+  assert.equal(verifyBankBatch("bni-direct", bni.replace(",INHOUSE,009,", ",LLG,009,")).ok, true);
+});
+
 test("an unknown bank id fails verification and does not throw", () => {
   const result = verifyBankBatch("cimb-niaga" as never, "NO,NAMA\r\n");
   assert.equal(result.ok, false);
