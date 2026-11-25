@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+import {
+  InvalidStatutoryTableError,
+  findTableForDate,
+  id2026DraftTable,
+  isStatutoryDeclared,
+  jpAnnualWageCap,
+  parseStatutoryTable,
+} from "../index.ts";
+import { loadSyntheticFixture, readJson } from "./fixture-table.ts";
+
+test("the 2026 draft parses and stays inside its effective window", () => {
+  assert.equal(id2026DraftTable.status, "draft");
+  assert.equal(id2026DraftTable.fixture, null);
+  assert.equal(id2026DraftTable.effectiveFrom, "2026-01-01");
+  assert.equal(id2026DraftTable.effectiveTo, "2026-12-31");
+  assert.equal(id2026DraftTable.pasal17.pkpRoundDownTo, 1000n);
+  assert.equal(isStatutoryDeclared(id2026DraftTable), false);
+});
+
+test("the synthetic fixture is labeled and is not a declared statutory file", () => {
+  const raw = readJson("./fixtures/synthetic-pph21.json") as { fixture?: string; not_official?: boolean };
+  assert.equal(raw.fixture, "synthetic");
+  assert.equal(raw.not_official, true);
+  const table = loadSyntheticFixture();
+  assert.equal(table.fixture, "synthetic");
+  assert.equal(isStatutoryDeclared(table), false);
+  assert.equal(table.pasal17.bands.length, id2026DraftTable.pasal17.bands.length);
+  for (let index = 0; index < table.pasal17.bands.length; index += 1) {
+    assert.equal(table.pasal17.bands[index]?.upTo, id2026DraftTable.pasal17.bands[index]?.upTo);
+    assert.equal(
+      table.pasal17.bands[index]?.ratePerScale,
+      id2026DraftTable.pasal17.bands[index]?.ratePerScale,
+    );
+  }
+});
+
+test("a published non-fixture table with rates is declared present", () => {
+  const copy = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as Record<string, unknown>;
+  delete copy.fixture;
+  delete copy.not_official;
+  delete copy.note;
+  copy.status = "published";
+  assert.equal(isStatutoryDeclared(parseStatutoryTable(copy)), true);
+  copy.status = "draft";
+  assert.equal(isStatutoryDeclared(parseStatutoryTable(copy)), false);
+});
+
+test("the JP cap on the synthetic fixture is the labeled stand-in, not a guessed statute", () => {
+  assert.equal(jpAnnualWageCap(loadSyntheticFixture()), 123456789n);
+});
+
+test("findTableForDate uses the injected date and rejects overlap or a gap", () => {
+  const current = loadSyntheticFixture();
+  const prior = parseStatutoryTable({
+    ...(readJson("./fixtures/synthetic-pph21.json") as Record<string, unknown>),
+    effective_from: "2025-01-01",
+    effective_to: "2025-12-31",
+  });
+  assert.equal(findTableForDate([prior, current], { year: 2026, month: 6, day: 15 }), current);
+  assert.equal(findTableForDate([current], { year: 2026, month: 1, day: 1 }), current);
+  assert.equal(findTableForDate([current], { year: 2026, month: 12, day: 31 }), current);
+  assert.throws(
+    () => findTableForDate([current], { year: 2025, month: 12, day: 31 }),
+    /No statutory table covers 2025-12-31/,
+  );
+  assert.throws(
+    () => findTableForDate([current, current], { year: 2026, month: 6, day: 1 }),
+    /Overlapping statutory tables/,
+  );
+});
+
+test("the loader rejects a guessed TER rate hidden in a missing category", () => {
+  const copy = structuredClone(readJson("../tables/id-2026.draft.json")) as Record<string, unknown>;
+  const ter = copy.ter as { categories: { A: Record<string, unknown> } };
+  ter.categories.A = {
+    source: "missing",
+    brackets: [{ up_to: null, rate_per_scale: 200 }],
+  };
+  assert.throws(() => parseStatutoryTable(copy), InvalidStatutoryTableError);
+});
+
+test("the loader rejects PTKP rupiah and a numeric JP cap while the source is missing", () => {
+  const ptkp = structuredClone(readJson("../tables/id-2026.draft.json")) as Record<string, unknown>;
+  const amounts = (ptkp.ptkp_annual as { amounts: { "TK/0": Record<string, unknown> } }).amounts;
+  amounts["TK/0"] = { source: "missing", rupiah: "54000000" };
+  assert.throws(() => parseStatutoryTable(ptkp), InvalidStatutoryTableError);
+
+  const cap = structuredClone(readJson("../tables/id-2026.draft.json")) as Record<string, unknown>;
+  cap.jp_annual_wage_cap = { source: "missing", rupiah: "100000000" };
+  assert.throws(() => parseStatutoryTable(cap), InvalidStatutoryTableError);
+});
+
+test("the loader rejects decreasing TER rates and money typed as a JSON number", () => {
+  assert.throws(
+    () =>
+      parseStatutoryTable({
+        ...(readJson("./fixtures/synthetic-pph21.json") as Record<string, unknown>),
+        ter: {
+          source: "synthetic",
+          tax_rounding: "half_up",
+          rate_scale: 10000,
+          categories: {
+            A: {
+              source: "synthetic",
+              brackets: [
+                { up_to: "1000000", rate_per_scale: 400 },
+                { up_to: null, rate_per_scale: 200 },
+              ],
+            },
+            B: {
+              source: "synthetic",
+              brackets: [{ up_to: null, rate_per_scale: 200 }],
+            },
+            C: {
+              source: "synthetic",
+              brackets: [{ up_to: null, rate_per_scale: 200 }],
+            },
+          },
+        },
+      }),
+    /must not decrease/,
+  );
+
+  const money = structuredClone(readJson("../tables/id-2026.draft.json")) as Record<string, unknown>;
+  (money.biaya_jabatan as { monthly_cap: unknown }).monthly_cap = 500000;
+  assert.throws(() => parseStatutoryTable(money), /integer string/);
+});
+
+test("the shipped draft file is the one the package exports", () => {
+  const raw = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../tables/id-2026.draft.json", import.meta.url)), "utf8"),
+  );
+  assert.deepEqual(parseStatutoryTable(raw).pasal17.bands, id2026DraftTable.pasal17.bands);
+});
