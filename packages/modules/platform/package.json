@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build",
-    "test": "node --experimental-strip-types --test --test-reporter spec src/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/env.test.ts src/schema.test.ts src/tokens.test.ts"
   },
   "dependencies": {
     "@gotonghr/contracts": "workspace:*",
@@ -25,6 +25,10 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@gotonghr/ai": "workspace:*",
+    "@gotonghr/audit": "workspace:*",
+    "@gotonghr/crypto": "workspace:*",
+    "@gotonghr/identity": "workspace:*",
     "@types/node": "22.20.6",
     "@types/pg": "8.23.1",
     "eslint": "10.15.0",

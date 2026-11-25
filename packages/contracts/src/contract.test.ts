@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fail, failWithFields, ok } from "./envelope.ts";
+import { supportPiiRevealDeny, supportPiiRevealSetting } from "./support-grant-audit.port.ts";
 import {
   canWriteOrg,
   idrToJson,
@@ -22,6 +23,11 @@ import {
   rolePermissions,
   roleScopeDefaults,
 } from "./roles.ts";
+
+test("the support-grant PII gate name is the transaction setting reveal checks", () => {
+  assert.equal(supportPiiRevealSetting, "app.support_pii_reveal");
+  assert.equal(supportPiiRevealDeny, "deny");
+});
 
 test("the JSON envelope keeps data, meta, and error together", () => {
   assert.deepEqual(ok({ status: "ok" }), {

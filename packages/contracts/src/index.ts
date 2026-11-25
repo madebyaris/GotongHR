@@ -57,3 +57,8 @@ export type {
 } from "./attendance-payroll.port.ts";
 export type { AuditAppendPort, AuditEventDraft } from "./audit-append.port.ts";
 export type { DomainActionCommand, DomainActionExecutor } from "./domain-action.port.ts";
+export { supportPiiRevealDeny, supportPiiRevealSetting } from "./support-grant-audit.port.ts";
+export type {
+  SupportGrantAuditPort,
+  SupportGrantTenantEvent,
+} from "./support-grant-audit.port.ts";

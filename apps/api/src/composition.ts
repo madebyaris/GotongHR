@@ -1,3 +1,4 @@
+import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor } from "@gotonghr/contracts";
 import {
   applyDatabaseUrls,
@@ -21,6 +22,7 @@ import {
   readPlatformDatabaseUrl,
   registerPlatform,
 } from "@gotonghr/platform";
+import { verifyStatutoryPayload } from "./statutory-verifier.ts";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { registerTenantAi } from "./ai.ts";
@@ -92,11 +94,13 @@ export async function composeFromEnv(
     await registerPlatform(app, {
       platform: platformDb,
       app: appDb,
+      tenantAudit: createSupportGrantAuditPort(appDb),
       mountPlatformRoutes: platformApiMounted(config.deploymentMode),
       inviteSecret: readAuthSecret(env),
       hashOwnerPassword: hashPassword,
       readPlatformActor: readers.readPlatformActor,
       readTenantAdmin: readers.readTenantAdmin,
+      verifyStatutoryPayload,
     });
     const runningApp = app;
 

@@ -1,5 +1,6 @@
 import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE } from "@gotonghr/db";
 import pg from "pg";
+import { sqlStringList, statutoryRuleTypes, statutoryStatuses } from "./schema.ts";
 
 const { Client } = pg;
 
@@ -28,6 +29,7 @@ export async function migratePlatform(input: PlatformMigrateInput): Promise<void
       await grantPlatformTables(migrator);
       await grantTenantMetadata(migrator);
       await grantSupportGrants(migrator);
+      await grantStatutoryTables(migrator);
       await migrator.query("COMMIT");
     } catch (error) {
       await migrator.query("ROLLBACK");
@@ -127,6 +129,26 @@ async function grantSupportGrants(client: pg.Client): Promise<void> {
   await client.query(`
     GRANT UPDATE (revoked_at, updated_at) ON TABLE sys_support_grants TO ${APP_ROLE}
   `);
+}
+
+async function grantStatutoryTables(client: pg.Client): Promise<void> {
+  await client.query(`REVOKE ALL ON TABLE pay_statutory_tables FROM PUBLIC`);
+  await client.query(`REVOKE ALL ON TABLE pay_statutory_tables FROM ${APP_ROLE}`);
+  await client.query(`REVOKE ALL ON TABLE pay_statutory_tables FROM ${QUEUE_ROLE}`);
+  await client.query(`REVOKE ALL ON TABLE pay_statutory_tables FROM ${PLATFORM_ROLE}`);
+  await client.query(
+    `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pay_statutory_tables TO ${PLATFORM_ROLE}`,
+  );
+  await client.query(`GRANT SELECT ON TABLE pay_statutory_tables TO ${APP_ROLE}`);
+  await client.query(`REVOKE ALL ON FUNCTION pay_statutory_tables_guard() FROM PUBLIC`);
+  await client.query(`REVOKE ALL ON FUNCTION pay_statutory_tables_guard() FROM ${APP_ROLE}`);
+  await client.query(`REVOKE ALL ON FUNCTION pay_statutory_tables_guard() FROM ${QUEUE_ROLE}`);
+  await client.query(
+    `REVOKE ALL ON FUNCTION pay_statutory_tables_guard() FROM ${PLATFORM_ROLE}`,
+  );
+  await client.query(
+    `GRANT EXECUTE ON FUNCTION pay_statutory_tables_guard() TO ${PLATFORM_ROLE}`,
+  );
 }
 
 const tableSql = `
@@ -243,6 +265,117 @@ COMMENT ON TABLE sys_platform_audit_events IS 'Append-only platform operator log
 ALTER TABLE sys_support_grants DROP CONSTRAINT IF EXISTS sys_support_grants_expiry_after_create;
 ALTER TABLE sys_support_grants ADD CONSTRAINT sys_support_grants_expiry_after_create
   CHECK (expires_at > created_at AND expires_at <= created_at + interval '4 hours');
+
+CREATE TABLE IF NOT EXISTS pay_statutory_tables (
+  id uuid PRIMARY KEY DEFAULT uuidv7(),
+  rule_type text NOT NULL,
+  version_label text NOT NULL,
+  effective_from date NOT NULL,
+  effective_to date,
+  status text NOT NULL DEFAULT 'draft',
+  payload_json jsonb NOT NULL,
+  created_by_operator_id uuid NOT NULL REFERENCES sys_platform_operators (id),
+  published_by_operator_id uuid REFERENCES sys_platform_operators (id),
+  published_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE pay_statutory_tables DROP CONSTRAINT IF EXISTS pay_statutory_tables_status_check;
+ALTER TABLE pay_statutory_tables ADD CONSTRAINT pay_statutory_tables_status_check
+  CHECK (status IN (${sqlStringList(statutoryStatuses)}));
+ALTER TABLE pay_statutory_tables DROP CONSTRAINT IF EXISTS pay_statutory_tables_rule_type_check;
+ALTER TABLE pay_statutory_tables ADD CONSTRAINT pay_statutory_tables_rule_type_check
+  CHECK (rule_type IN (${sqlStringList(statutoryRuleTypes)}));
+ALTER TABLE pay_statutory_tables DROP CONSTRAINT IF EXISTS pay_statutory_tables_effective_order;
+ALTER TABLE pay_statutory_tables ADD CONSTRAINT pay_statutory_tables_effective_order
+  CHECK (effective_to IS NULL OR effective_to >= effective_from);
+ALTER TABLE pay_statutory_tables DROP CONSTRAINT IF EXISTS pay_statutory_tables_version_label_check;
+ALTER TABLE pay_statutory_tables ADD CONSTRAINT pay_statutory_tables_version_label_check
+  CHECK (length(trim(version_label)) BETWEEN 1 AND 80);
+ALTER TABLE pay_statutory_tables DROP CONSTRAINT IF EXISTS pay_statutory_tables_publish_meta_check;
+ALTER TABLE pay_statutory_tables ADD CONSTRAINT pay_statutory_tables_publish_meta_check
+  CHECK (
+    (
+      status = 'published'
+      AND published_at IS NOT NULL
+      AND published_by_operator_id IS NOT NULL
+    )
+    OR (
+      status IN ('draft', 'archived')
+      AND published_at IS NULL
+      AND published_by_operator_id IS NULL
+    )
+  );
+
+CREATE INDEX IF NOT EXISTS pay_statutory_tables_lookup_idx
+  ON pay_statutory_tables (rule_type, effective_from)
+  WHERE status = 'published';
+
+ALTER TABLE pay_statutory_tables ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pay_statutory_tables FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS pay_statutory_tables_platform_all ON pay_statutory_tables;
+CREATE POLICY pay_statutory_tables_platform_all ON pay_statutory_tables
+  FOR ALL
+  TO ${PLATFORM_ROLE}
+  USING (true)
+  WITH CHECK (true);
+DROP POLICY IF EXISTS pay_statutory_tables_tenant_read ON pay_statutory_tables;
+CREATE POLICY pay_statutory_tables_tenant_read ON pay_statutory_tables
+  FOR SELECT
+  TO ${APP_ROLE}
+  USING (status = 'published');
+
+CREATE OR REPLACE FUNCTION pay_statutory_tables_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $guard$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status = 'published' THEN
+      RAISE EXCEPTION 'published statutory table is immutable'
+        USING ERRCODE = '55000';
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND OLD.status = 'published' THEN
+    RAISE EXCEPTION 'published statutory table is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.status = 'published' THEN
+    PERFORM pg_advisory_xact_lock(hashtext('pay_statutory_tables'), hashtext(NEW.rule_type));
+    IF EXISTS (
+      SELECT 1
+      FROM pay_statutory_tables AS existing
+      WHERE existing.rule_type = NEW.rule_type
+        AND existing.status = 'published'
+        AND existing.id IS DISTINCT FROM NEW.id
+        AND (NEW.effective_to IS NULL OR existing.effective_from <= NEW.effective_to)
+        AND (existing.effective_to IS NULL OR NEW.effective_from <= existing.effective_to)
+    ) THEN
+      RAISE EXCEPTION 'published statutory ranges overlap'
+        USING ERRCODE = '23P01';
+    END IF;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    NEW.updated_at = now();
+  END IF;
+  RETURN NEW;
+END
+$guard$;
+
+DROP TRIGGER IF EXISTS pay_statutory_tables_guard_trg ON pay_statutory_tables;
+CREATE TRIGGER pay_statutory_tables_guard_trg
+  BEFORE INSERT OR UPDATE OR DELETE ON pay_statutory_tables
+  FOR EACH ROW
+  EXECUTE FUNCTION pay_statutory_tables_guard();
+
+COMMENT ON TABLE pay_statutory_tables IS
+  'Effective-dated statutory payloads. Published rows do not overlap for one rule_type and cannot be edited. app_tenant may select published rows only.';
 `;
 
 const functionSql = `

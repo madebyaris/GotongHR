@@ -81,14 +81,15 @@ function auditInput(event: AuditEventDraft) {
   return {
     tenantId: event.tenantId,
     actorUserId: event.actorUserId,
+    actorRole: event.actorRole,
     action: event.action,
     resourceType: event.resourceType,
-    diff: event.diff,
     resourceId: event.resourceId,
+    diff: event.diff,
     aiProposalId: event.aiProposalId,
-    ...(event.actorRole ? { actorRole: event.actorRole } : {}),
-    ...(event.ipAddress ? { ipAddress: event.ipAddress } : {}),
-    ...(event.userAgent ? { userAgent: event.userAgent } : {}),
+    supportGrantId: null,
+    ipAddress: event.ipAddress,
+    userAgent: event.userAgent,
   };
 }
 

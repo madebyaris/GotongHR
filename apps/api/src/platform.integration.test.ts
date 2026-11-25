@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { ok } from "@gotonghr/contracts";
+import { createSupportGrantAuditPort, migrateAudit } from "@gotonghr/audit";
+import { ok, type SupportGrantAuditPort } from "@gotonghr/contracts";
 import {
   applyDatabaseUrls,
   loadRepoEnv,
@@ -46,6 +47,7 @@ applyDatabaseUrls(process.env);
 describe("platform admin", { concurrency: 1 }, () => {
   let composed: ComposedApp;
   let platform: PlatformDatabase;
+  let tenantAudit: SupportGrantAuditPort;
   let operatorId = "";
   let otherOperatorId = "";
   let operatorCookie = "";
@@ -71,10 +73,12 @@ describe("platform admin", { concurrency: 1 }, () => {
       superuserUrl: migrateEnv.superuserUrl,
       migratorUrl: migrateEnv.migratorUrl,
     });
+    await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
     await provisionQueue(migrateEnv.migratorUrl);
     await resetRows();
     composed = await composeFromEnv(process.env);
     composedRef = composed;
+    tenantAudit = createSupportGrantAuditPort(composed.appDb);
     platform = await openPlatformDatabase(requiredEnv(process.env, "DATABASE_URL_PLATFORM"));
     composed.app.get("/api/v1/probe/session", { preHandler: requireSession() }, async () =>
       ok({ ok: true }),
@@ -403,6 +407,7 @@ describe("platform admin", { concurrency: 1 }, () => {
         withSupportSession(
           platform,
           composed.appDb,
+          tenantAudit,
           { sessionToken: session.sessionToken, actorId: operatorId, ip: null },
           async ({ tx, scope, allowPiiReveal }) => {
             assert.equal(scope, "read_only");
@@ -417,6 +422,7 @@ describe("platform admin", { concurrency: 1 }, () => {
       const visible = await withSupportSession(
         platform,
         composed.appDb,
+        tenantAudit,
         { sessionToken: session.sessionToken, actorId: operatorId, ip: null },
         async ({ tx, scope, allowPiiReveal }) => {
           assert.equal(scope, "read_only");
@@ -445,6 +451,7 @@ describe("platform admin", { concurrency: 1 }, () => {
       const wrote = await withSupportSession(
         platform,
         composed.appDb,
+        tenantAudit,
         { sessionToken: writableSession.sessionToken, actorId: operatorId, ip: null },
         async ({ tx, scope }) => {
           assert.equal(scope, "read_write");
@@ -527,8 +534,8 @@ describe("platform admin", { concurrency: 1 }, () => {
     assert.equal(readError(closed.body), "grant_revoked");
 
     const draft = await post("/api/v1/platform/statutory-tables", { name: "pph21" }, operatorCookie);
-    assert.equal(draft.statusCode, 501, draft.body);
-    assert.equal(readError(draft.body), "not_implemented");
+    assert.equal(draft.statusCode, 400, draft.body);
+    assert.equal(readError(draft.body), "invalid");
     const drafts = await get("/api/v1/platform/statutory-tables", operatorCookie);
     assert.equal(drafts.statusCode, 200, drafts.body);
     assert.deepEqual(readData<unknown[]>(drafts.body), []);
@@ -742,7 +749,20 @@ async function resetRows(): Promise<void> {
   await admin.connect();
   try {
     await admin.query(`
+      DO $$
+      BEGIN
+        IF to_regclass('public.aud_events') IS NOT NULL THEN
+          TRUNCATE TABLE
+            aud_events,
+            aud_pii_access_logs,
+            aud_outbox_events,
+            aud_tenant_keys;
+        END IF;
+      END $$
+    `);
+    await admin.query(`
       TRUNCATE TABLE
+        pay_statutory_tables,
         sys_platform_audit_events,
         sys_support_grants,
         sys_tenant_quotas,

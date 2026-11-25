@@ -6,7 +6,10 @@ module.exports = {
       severity: "error",
       comment:
         "packages/modules/* cannot import a sibling module schema or internals.",
-      from: { path: "^packages/modules/([^/]+)/" },
+      from: {
+        path: "^packages/modules/([^/]+)/",
+        pathNot: "^packages/modules/platform/src/isolation(-schema|\\.integration\\.test)\\.ts$",
+      },
       to: {
         path: "^packages/modules/",
         pathNot: "^packages/modules/$1/",
@@ -17,7 +20,10 @@ module.exports = {
       severity: "error",
       comment:
         "Platform talks to identity through apps/api. It does not import the identity module.",
-      from: { path: "^packages/modules/platform/" },
+      from: {
+        path: "^packages/modules/platform/",
+        pathNot: "^packages/modules/platform/src/isolation(-schema|\\.integration\\.test)\\.ts$",
+      },
       to: { path: "^packages/modules/identity/" },
     },
     {

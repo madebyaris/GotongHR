@@ -1,4 +1,4 @@
-import { fail, ok } from "@gotonghr/contracts";
+import { fail, ok, type SupportGrantAuditPort } from "@gotonghr/contracts";
 import type { TenantDatabase } from "@gotonghr/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
@@ -12,6 +12,12 @@ import {
   type GrantScope,
 } from "./grants.ts";
 import { featureFlagKeys, type FeatureFlagKey } from "./schema.ts";
+import {
+  createStatutoryDraft,
+  listStatutoryTables,
+  publishStatutoryTable,
+  type StatutoryPublishVerifier,
+} from "./statutory.ts";
 import { hashToken, randomToken, signInvite } from "./tokens.ts";
 import {
   listAuditEvents,
@@ -59,11 +65,13 @@ export type TenantAdminResult =
 export interface PlatformDeps {
   platform: PlatformDatabase;
   app: TenantDatabase;
+  tenantAudit: SupportGrantAuditPort;
   mountPlatformRoutes: boolean;
   inviteSecret: string;
   hashOwnerPassword(password: string): Promise<string>;
   readPlatformActor(request: FastifyRequest): Promise<PlatformActorResult>;
   readTenantAdmin(request: FastifyRequest): Promise<TenantAdminResult>;
+  verifyStatutoryPayload: StatutoryPublishVerifier;
 }
 
 const flagPatch = z
@@ -134,6 +142,16 @@ const idParam = z.object({
   id: z.uuid(),
 });
 
+const statutoryDraftBody = z
+  .object({
+    ruleType: z.literal("pph21"),
+    versionLabel: z.string().trim().min(1).max(80),
+    effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).nullable(),
+    payload: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
 const tenantListQuery = z.object({
   cursor: z.string().min(1).max(300).optional(),
   limit: z.string().regex(/^[1-9][0-9]{0,2}$/u).optional(),
@@ -141,7 +159,8 @@ const tenantListQuery = z.object({
 
 /**
  * Platform routes and tenant support-grant routes mount together.
- * `single_tenant` leaves both unmounted. Slice 1.3 adds the tenant audit copy.
+ * `single_tenant` leaves both unmounted.
+ * Grant actions append tenant `aud_events` through `tenantAudit`.
  */
 export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps): Promise<void> {
   if (!deps.mountPlatformRoutes) return;
@@ -154,7 +173,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const scope: GrantScope = body.scope ?? "read_only";
     const allowPiiReveal = body.allowPiiReveal ?? false;
     await run(reply, async () => {
-      const created = await createSupportGrant(deps.app, {
+      const created = await createSupportGrant(deps.app, deps.tenantAudit, {
         tenantId: admin.tenantId,
         grantedByUserId: admin.userId,
         granteePlatformUserId: body.granteePlatformUserId,
@@ -162,6 +181,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
         expiresAt: new Date(body.expiresAt),
         scope,
         allowPiiReveal,
+        ip: admin.ip,
       });
       return reply.code(201).send(ok(created));
     });
@@ -173,9 +193,11 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const params = await parseBody(reply, idParam, request.params);
     if (!params) return;
     await run(reply, async () => {
-      const revoked = await revokeSupportGrant(deps.app, {
+      const revoked = await revokeSupportGrant(deps.app, deps.tenantAudit, {
         tenantId: admin.tenantId,
         grantId: params.id,
+        actorUserId: admin.userId,
+        ip: admin.ip,
       });
       return reply.send(ok(revoked));
     });
@@ -305,21 +327,44 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
   app.get("/api/v1/platform/statutory-tables", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
-    return reply.send(ok([], { implemented: false }));
+    await run(reply, async () => reply.send(ok(await listStatutoryTables(deps.platform))));
   });
 
   app.post("/api/v1/platform/statutory-tables", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
     if (!(await requireSuperAdmin(actor, reply))) return;
-    return reply.code(501).send(fail("not_implemented", "Statutory drafts land in a later slice."));
+    const body = await parseBody(reply, statutoryDraftBody, request.body);
+    if (!body) return;
+    await run(reply, async () => {
+      const created = await createStatutoryDraft(deps.platform, {
+        ruleType: body.ruleType,
+        versionLabel: body.versionLabel,
+        effectiveFrom: body.effectiveFrom,
+        effectiveTo: body.effectiveTo,
+        payload: body.payload,
+        actorId: actor.id,
+        ip: actor.ip,
+      });
+      return reply.code(201).send(ok(created));
+    });
   });
 
   app.post("/api/v1/platform/statutory-tables/:id/publish", async (request, reply) => {
     const actor = await requireActor(deps, request, reply);
     if (!actor) return;
     if (!(await requireSuperAdmin(actor, reply))) return;
-    return reply.code(501).send(fail("not_implemented", "Statutory publishing lands in a later slice."));
+    const params = await parseBody(reply, idParam, request.params);
+    if (!params) return;
+    await run(reply, async () => {
+      const published = await publishStatutoryTable(deps.platform, {
+        id: params.id,
+        actorId: actor.id,
+        ip: actor.ip,
+        verify: deps.verifyStatutoryPayload,
+      });
+      return reply.send(ok(published));
+    });
   });
 
   app.get("/api/v1/platform/health/tenants", async (request, reply) => {
@@ -334,7 +379,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
     const body = await parseBody(reply, activateBody, request.body);
     if (!body) return;
     await run(reply, async () => {
-      const activated = await activateSupportGrant(deps.platform, deps.app, {
+      const activated = await activateSupportGrant(deps.platform, deps.app, deps.tenantAudit, {
         token: body.token,
         actorId: actor.id,
         ip: actor.ip,
@@ -352,6 +397,7 @@ export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps)
       const opened = await withSupportSession(
         deps.platform,
         deps.app,
+        deps.tenantAudit,
         { sessionToken: body.sessionToken, actorId: actor.id, ip: actor.ip },
         async () => null,
       );
