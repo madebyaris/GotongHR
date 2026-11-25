@@ -14,6 +14,8 @@ COPY packages/crypto/package.json packages/crypto/package.json
 COPY packages/modules/identity/package.json packages/modules/identity/package.json
 COPY packages/modules/audit/package.json packages/modules/audit/package.json
 COPY packages/modules/platform/package.json packages/modules/platform/package.json
+COPY packages/modules/ai/package.json packages/modules/ai/package.json
+COPY packages/modules/core-hr/package.json packages/modules/core-hr/package.json
 COPY tooling/arch-tests/package.json tooling/arch-tests/package.json
 COPY tooling/eslint-config/package.json tooling/eslint-config/package.json
 RUN corepack pnpm install --frozen-lockfile --filter @gotonghr/web...

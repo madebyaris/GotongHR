@@ -13,8 +13,14 @@
 		respond 404
 	}
 
-	# Keep the /api prefix. Fastify serves /api/v1/* and /api/auth/*.
-	# handle_path would strip /api and the upstream route would miss.
+	# Keep the /api prefix for /api/v1/* and /api/auth/*.
+	# handle_path would strip /api and those routes would miss.
+	# Fastify serves readiness at /readyz, so only that path is rewritten.
+	handle /api/readyz {
+		rewrite * /readyz
+		reverse_proxy api:3000
+	}
+
 	handle /api/* {
 		encode zstd gzip
 		reverse_proxy api:3000

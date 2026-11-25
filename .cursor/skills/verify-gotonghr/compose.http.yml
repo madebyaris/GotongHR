@@ -1,0 +1,15 @@
+# Verification scaffolding for the HTTP Caddy port in docker-compose.vps.yml.
+# The API image sets NODE_ENV=production, and production refuses an http
+# BETTER_AUTH_URL. This override is only for a run whose browser origin is
+# http://127.0.0.1. Do not use it when TLS terminates in front of Caddy.
+services:
+  api:
+    environment:
+      NODE_ENV: development
+      GOTONG_BOOTSTRAP_EMAIL: ${GOTONG_BOOTSTRAP_EMAIL:?Set GOTONG_BOOTSTRAP_EMAIL}
+      GOTONG_BOOTSTRAP_PASSWORD: ${GOTONG_BOOTSTRAP_PASSWORD:?Set GOTONG_BOOTSTRAP_PASSWORD}
+      GOTONG_BOOTSTRAP_TENANT_NAME: ${GOTONG_BOOTSTRAP_TENANT_NAME:-GotongHR}
+      GOTONG_BOOTSTRAP_OWNER_NAME: ${GOTONG_BOOTSTRAP_OWNER_NAME:-Owner}
+  migrate:
+    environment:
+      NODE_ENV: development
