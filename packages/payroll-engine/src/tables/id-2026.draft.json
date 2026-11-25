@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "rule_type": "pph21",
+  "status": "draft",
+  "effective_from": "2026-01-01",
+  "effective_to": "2026-12-31",
+  "pasal17": {
+    "source": "uu-hpp-pasal-17",
+    "pkp_round_down_to": "1000",
+    "bands": [
+      { "up_to": "60000000", "rate_per_scale": 500, "rate_scale": 10000 },
+      { "up_to": "250000000", "rate_per_scale": 1500, "rate_scale": 10000 },
+      { "up_to": "500000000", "rate_per_scale": 2500, "rate_scale": 10000 },
+      { "up_to": "5000000000", "rate_per_scale": 3000, "rate_scale": 10000 },
+      { "up_to": null, "rate_per_scale": 3500, "rate_scale": 10000 }
+    ]
+  },
+  "biaya_jabatan": {
+    "source": "pmk-biaya-jabatan",
+    "rate_per_scale": 500,
+    "rate_scale": 10000,
+    "rounding": "floor",
+    "monthly_cap": "500000"
+  },
+  "ptkp_annual": {
+    "source": "missing",
+    "amounts": {
+      "TK/0": { "source": "missing" },
+      "TK/1": { "source": "missing" },
+      "TK/2": { "source": "missing" },
+      "TK/3": { "source": "missing" },
+      "K/0": { "source": "missing" },
+      "K/1": { "source": "missing" },
+      "K/2": { "source": "missing" },
+      "K/3": { "source": "missing" }
+    }
+  },
+  "ter": {
+    "source": "missing",
+    "tax_rounding": "half_up",
+    "rate_scale": 10000,
+    "categories": {
+      "A": { "source": "missing" },
+      "B": { "source": "missing" },
+      "C": { "source": "missing" }
+    }
+  },
+  "jp_annual_wage_cap": { "source": "missing" }
+}
