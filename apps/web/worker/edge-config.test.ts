@@ -251,8 +251,9 @@ test("Cloudflare compose drops the static frontend and caps the tunnel", () => {
   assert.doesNotMatch(file, /cloudflare-origin-pull-ca\.pem/);
   assert.match(file, /profiles: \["origin-pull"\]/);
   assert.doesNotMatch(file, /80:8080/);
-  assert.match(file, /TRUSTED_ORIGINS:/);
-  assert.match(file, /TRUSTED_PROXY_CIDRS:/);
+  assert.match(file, /GOTONG_TRUST_CLOUDFLARE: \$\{GOTONG_TRUST_CLOUDFLARE:-true\}/);
+  assert.doesNotMatch(file, /TRUSTED_ORIGINS:/);
+  assert.doesNotMatch(file, /TRUSTED_PROXY_CIDRS:/);
 });
 
 test("edge docs keep the WAF on and describe the zone origin-pull CA", () => {
@@ -266,7 +267,14 @@ test("edge docs keep the WAF on and describe the zone origin-pull CA", () => {
   assert.match(readme, /preload/);
   assert.match(readme, /difficult to reverse/);
   assert.match(readme, /\/api\/v1\/mobile\/clock/);
-  assert.match(readme, /none in the API yet, required after Slice 1\.1/);
+  assert.match(readme, /none in the API yet/);
+  assert.match(readme, /Slice 1\.1 limits credential routes per IP/);
+  assert.match(readme, /GOTONG_TRUST_PROXY/);
+  assert.match(readme, /GOTONG_TRUST_CLOUDFLARE/);
+  assert.match(readme, /apps\/api\/src\/trust-proxy\.ts/);
+  assert.doesNotMatch(readme, /client-ip\.ts/);
+  assert.doesNotMatch(readme, /TRUSTED_PROXY_CIDRS/);
+  assert.doesNotMatch(readme, /required after Slice 1\.1/);
   assert.match(readme, /CGNAT/);
   assert.doesNotMatch(readme, /authenticated_origin_pull_ca\.pem`\. That CA is the one to trust/);
 });

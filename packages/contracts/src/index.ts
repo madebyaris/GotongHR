@@ -4,6 +4,17 @@ export { idr } from "./idr.ts";
 export type { Idr } from "./idr.ts";
 export { isPermissionAtom, permissionAtoms } from "./permissions.ts";
 export type { PermissionAtom } from "./permissions.ts";
+export {
+  isPrivilegedRole,
+  isRoleCode,
+  permissionRequiresPrivilegedTotp,
+  privilegedRoleCodes,
+  roleCodes,
+  roleHasPermission,
+  rolePermissions,
+  roleScopeDefaults,
+} from "./roles.ts";
+export type { PrivilegedRoleCode, RoleCode, RoleScopeDefault } from "./roles.ts";
 export { ptkpStatuses } from "./core-hr-payroll.port.ts";
 export type {
   CoreHrPayrollPort,

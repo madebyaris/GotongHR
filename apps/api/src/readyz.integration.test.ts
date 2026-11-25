@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import pg from "pg";
 import { loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
+import { migrateIdentity } from "@gotonghr/identity";
 import { composeFromEnv, type ComposedApp } from "./composition.ts";
 import { provisionQueue } from "./queue.ts";
 
@@ -18,7 +19,12 @@ describe("readyz against postgres", { concurrency: 1 }, () => {
     process.env.STORAGE_DRIVER ??= "local";
     process.env.STORAGE_LOCAL_SECRET = "local-test-storage-secret-0123456789";
     process.env.QUEUE_DRIVER ??= "pgboss";
-    await migrate(migrateEnvFrom(process.env));
+    const migrateEnv = migrateEnvFrom(process.env);
+    await migrate(migrateEnv);
+    await migrateIdentity({
+      superuserUrl: migrateEnv.superuserUrl,
+      migratorUrl: migrateEnv.migratorUrl,
+    });
     await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
     composed = await composeFromEnv(process.env);
   });

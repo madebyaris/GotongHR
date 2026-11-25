@@ -2,7 +2,7 @@
 
 The browser loads the Vite SPA from a Cloudflare Worker. The VPS runs the API and Postgres. Hashed files are served by Workers Static Assets, so those requests do not invoke the Worker.
 
-This repository does not change `apps/api`. The `trustProxy` patch at the end of this file waits until Slice 1.1 has merged.
+Slice 1.1 already sets Fastify `trustProxy` from `GOTONG_TRUST_PROXY`. It reads `CF-Connecting-IP` only when `GOTONG_TRUST_CLOUDFLARE=true`. This profile does not replace `apps/api/src/trust-proxy.ts`.
 
 ## Deploy the Worker
 
@@ -113,12 +113,12 @@ Rate limits count by `cf.colo.id` and `ip.src`. They do not count by a cookie or
 | `/api/auth/two-factor*` | 90 | 60 seconds |
 | `/api/auth/forget-password*` | 30 | 120 seconds |
 | `/api/attendance/clock*`, `/api/v1/attendance/clock*` | 180 | 10 seconds |
-| `/api/v1/mobile/clock*` | none at the edge | none in the API yet, required after Slice 1.1 |
+| `/api/v1/mobile/clock*` | none at the edge | none in the API yet |
 | `/api/ai/*` | 60 | 30 seconds |
 
 180 office clock-in requests cover 30 people with a status read and retries at 08:00 WIB. A limit of 10 or 30 per minute would block that office. `/api/v1/attendance/clock` is included so a versioned mount is covered. Periods of 60 seconds need a plan that allows that period. If the account only allows 10 second periods, keep `requests_per_period` at least 120 for office clock-in.
 
-`/api/v1/mobile/clock` is not on the per-IP rule. A carrier CGNAT address is shared by subscribers who do not work together, so the 180 per minute office cap would return 429 to people outside that office. The API must limit that route per authenticated user and per device after Slice 1.1. Until that limit exists, one CGNAT address can send an unlimited number of mobile clock requests. That is the trade-off. Do not put the mobile path back on `ip.src` to close it.
+`/api/v1/mobile/clock` is not on the per-IP rule. A carrier CGNAT address is shared by subscribers who do not work together, so the 180 per minute office cap would return 429 to people outside that office. Slice 1.1 limits credential routes per IP. It does not limit this route per user or per device. Until that limit exists, one CGNAT address can send an unlimited number of mobile clock requests. That is the trade-off. Do not put the mobile path back on `ip.src` to close it.
 
 ## Platform Super-Admin
 
@@ -131,7 +131,7 @@ Add `/api/v1/platform` if the API is mounted there. The policy allows the platfo
 
 The WAF does not block the HTML `/platform` route. Access can still show its login page. The API rule blocks calls that have none of the Access credentials. After login, the browser sends `CF_Authorization`. Automation uses an Access service token.
 
-The SPA route is still only a front door. The API must keep its own platform role check after Slice 1.1.
+The SPA route is still only a front door. Slice 1.1 does not mount platform routes. When they are mounted, the API must check the platform role itself.
 
 ## API-only VPS
 
@@ -198,130 +198,14 @@ In the dashboard, open SSL/TLS, Origin Server, Authenticated Origin Pulls. Under
 
 Copy `rootca.crt` to `infra/caddy/certs/cloudflare-zone-origin-pull-ca.pem` on the VPS before `docker compose up`. That filename is gitignored. The compose file mounts it at `/etc/caddy/certs/cloudflare-zone-origin-pull-ca.pem`. Paths in the overlay are relative to `docker/`, because `docker/docker-compose.vps.yml` is the first `-f` file. If the CA file is missing, Compose creates a directory at that path and Caddy does not start cleanly. Do not commit the CA, `rootca.key`, or `cert.key`.
 
-## API patch after Slice 1.1
+## Proxy settings
 
-Do not set Fastify `trustProxy: true`. That trusts `X-Forwarded-For` from every caller who can open the port.
+Slice 1.1 reads these variables in `apps/api/src/trust-proxy.ts` and the identity module. Do not add a second helper, and do not set `GOTONG_TRUST_PROXY=true`. The API rejects `true` because that trusts every peer.
 
-Add `apps/api/src/client-ip.ts`:
+`GOTONG_TRUST_PROXY` defaults to `1`. That trusts one forwarding hop, and only when the socket peer is loopback, link-local, or a private address. The overlay removes the published API port, so the peer is cloudflared or the origin-pull Caddy container on the Docker network. Leave the default. Set an address or CIDR list only when that peer is not a private address.
 
-```typescript
-import { isIP } from "node:net";
-import type { FastifyRequest } from "fastify";
+`GOTONG_TRUST_CLOUDFLARE=true` uses `CF-Connecting-IP` for the credential rate-limit key when the socket peer is a trusted proxy. The overlay defaults this to `true`. Set it to `false` on a VPS that is not behind Cloudflare Tunnel or zone Authenticated Origin Pulls. A client who can open port 3000 must not be able to supply that header.
 
-const LOOPBACK = ["127.0.0.1/32", "::1/128"];
-
-export function trustProxy(address: string): boolean {
-  return isTrustedHop(address);
-}
-
-export function isTrustedHop(address: string): boolean {
-  const peer = normalize(address);
-  return configuredCidrs().some((cidr) => contains(peer, cidr));
-}
-
-export function clientIp(request: FastifyRequest): string {
-  const peer = normalize(request.socket.remoteAddress ?? "");
-  if (!isTrustedHop(peer)) return peer;
-  const header = request.headers["cf-connecting-ip"];
-  if (typeof header === "string" && header !== "" && !header.includes(",") && isIP(header) !== 0) {
-    return header;
-  }
-  return peer;
-}
-
-function configuredCidrs(): string[] {
-  const raw = process.env.TRUSTED_PROXY_CIDRS ?? "";
-  const extra = raw.split(",").map((item) => item.trim()).filter((item) => item !== "");
-  return [...LOOPBACK, ...extra];
-}
-
-function normalize(address: string): string {
-  const withoutZone = address.split("%")[0] ?? address;
-  return withoutZone.startsWith("::ffff:") ? withoutZone.slice("::ffff:".length) : withoutZone;
-}
-
-function contains(ip: string, cidr: string): boolean {
-  const slash = cidr.indexOf("/");
-  const range = slash === -1 ? cidr : cidr.slice(0, slash);
-  const bits = slash === -1 ? 32 : Number(cidr.slice(slash + 1));
-  if (range === "" || !Number.isInteger(bits)) return false;
-  if (ip.includes(":") || range.includes(":")) return ip === range;
-  const ipInt = ipv4ToInt(ip);
-  const rangeInt = ipv4ToInt(range);
-  if (ipInt === undefined || rangeInt === undefined || bits < 0 || bits > 32) return false;
-  if (bits === 0) return true;
-  const mask = (~0 << (32 - bits)) >>> 0;
-  return (ipInt & mask) === (rangeInt & mask);
-}
-
-function ipv4ToInt(ip: string): number | undefined {
-  const parts = ip.split(".");
-  if (parts.length !== 4) return undefined;
-  let value = 0;
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return undefined;
-    const n = Number(part);
-    if (n > 255) return undefined;
-    value = (value * 256 + n) >>> 0;
-  }
-  return value;
-}
-```
-
-In `apps/api/src/server.ts`, pass the function into Fastify:
-
-```typescript
-import { trustProxy } from "./client-ip.ts";
-
-const app = Fastify({
-  logger: deps.logger ? { level: "info" } : false,
-  bodyLimit: 2 * 1024 * 1024,
-  trustProxy,
-});
-```
-
-Use `clientIp(request)` anywhere the audit log or a rate limit needs the employee IP. `request.ip` agrees when the only trusted peer is Caddy or cloudflared, because those proxies replace `X-Forwarded-For` with the same single address. If the peer is not in `TRUSTED_PROXY_CIDRS`, both values stay the socket address and a spoofed header is ignored.
-
-The compose overlay sets `TRUSTED_PROXY_CIDRS` to `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` unless you override it. That is safe only while port 3000 is not published. The IPv6 helper above matches loopback and exact addresses. Add an exact IPv6 proxy address if the compose network is IPv6.
-
-`TRUSTED_ORIGINS` is the browser origin list for Better Auth, not the internal API URL. For the same-origin Worker it is one value, the public site:
-
-```bash
-TRUSTED_ORIGINS=https://hr.example.co.id
-BETTER_AUTH_URL=https://hr.example.co.id
-```
-
-Add this next to the Better Auth constructor in the identity module:
-
-```typescript
-import { readTrustedOrigins } from "../trusted-origins.ts";
-
-trustedOrigins: readTrustedOrigins(process.env.TRUSTED_ORIGINS, process.env),
-baseURL: process.env.BETTER_AUTH_URL,
-```
-
-```typescript
-export function readTrustedOrigins(raw: string | undefined, env: NodeJS.ProcessEnv): string[] {
-  const origins = (raw ?? "").split(",").map((item) => item.trim()).filter((item) => item !== "");
-  if (env.NODE_ENV === "production" && origins.length === 0) {
-    throw new Error("TRUSTED_ORIGINS is required in production.");
-  }
-  for (const origin of origins) {
-    let url: URL;
-    try {
-      url = new URL(origin);
-    } catch {
-      throw new Error("TRUSTED_ORIGINS has an invalid origin.");
-    }
-    if (url.origin !== origin) {
-      throw new Error("TRUSTED_ORIGINS must be an origin without a path.");
-    }
-    if (env.NODE_ENV === "production" && url.protocol !== "https:") {
-      throw new Error("TRUSTED_ORIGINS must use HTTPS in production.");
-    }
-  }
-  return origins;
-}
-```
+`BETTER_AUTH_URL` is the public browser origin, for example `https://hr.example.co.id`. The base compose file already requires it. The overlay does not replace it. Extra browser origins go in `GOTONG_TRUSTED_ORIGINS`.
 
 Session cookies stay `HttpOnly`, `Secure`, and `SameSite=Lax`. The Worker does not rewrite `Set-Cookie`. `BETTER_AUTH_URL` must be the public `https` origin so redirects and cookie domains do not point at `http://api:3000`.

@@ -7,6 +7,7 @@ export interface PayslipTextRun {
   x: number;
   y: number;
   width: number;
+  page: number;
 }
 
 export interface DecryptedPayslip {
@@ -43,13 +44,13 @@ export async function readPayslipText(
         continue;
       }
       parts.push(run.str);
-      runs.push(run);
+      runs.push({ ...run, page: pageNumber });
     }
   }
   return { text: parts.join("\n"), pageCount: opened.numPages, runs };
 }
 
-function textRun(item: unknown): PayslipTextRun | null {
+function textRun(item: unknown): Omit<PayslipTextRun, "page"> | null {
   if (item === null || typeof item !== "object") {
     return null;
   }

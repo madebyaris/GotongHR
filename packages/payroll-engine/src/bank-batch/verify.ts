@@ -39,6 +39,7 @@ function verifyBca(body: string): BankBatchVerification {
   if (header.length !== 5 || header[0] !== "BCA_KLIKBISNIS") {
     return failed("The header is not a BCA KlikBISNIS control record.");
   }
+  if (!isAccount(header[1])) return failed("The header debit account is not 8 to 18 digits.");
   if (!/^[0-9]{8}$/.test(header[2] ?? "")) return failed("The header date is not YYYYMMDD.");
   const headerCount = parseCount(header[3]);
   const headerTotal = parseWholeIdr(header[4]);
@@ -46,8 +47,9 @@ function verifyBca(body: string): BankBatchVerification {
   if (lines[1] !== BCA_COLUMNS) return failed("The column header is not the BCA KlikBISNIS upload header.");
   return sumDetails(lines.slice(2), headerCount, headerTotal, (fields) => {
     if (fields.length !== 7) return "A BCA detail row does not have 7 columns.";
-    if (!isAccount(fields[0]) || !isBankCode(fields[3]) || !isMember(fields[4], BCA_TRANSFER_TYPES)) {
-      return "A BCA detail row is missing the account, bank code, or transfer type.";
+    if (!isAccount(fields[0])) return "A BCA detail row account is not 8 to 18 digits.";
+    if (!bcaRouteOk(fields[3], fields[4])) {
+      return "A BCA detail row bank code does not match its transfer type.";
     }
     return readAmount(fields[2]);
   });
@@ -72,8 +74,9 @@ function verifyBni(body: string): BankBatchVerification {
     if (fields[0] !== String(detailCount + 1) || fields[1] !== debit || fields[4] !== "IDR") {
       return "A BNI detail row has the wrong number, debit account, or currency.";
     }
-    if (!isAccount(fields[2]) || !isMember(fields[7], BNI_TRANSFER_TYPES) || !isBankCode(fields[8])) {
-      return "A BNI detail row is missing the account, bank code, or transfer type.";
+    if (!isAccount(fields[2])) return "A BNI detail row account is not 8 to 18 digits.";
+    if (!bniRouteOk(fields[8], fields[7])) {
+      return "A BNI detail row bank code does not match its transfer type.";
     }
     return readAmount(fields[5]);
   });
@@ -195,6 +198,22 @@ function isBankCode(value: string | undefined): boolean {
 
 function isMember(value: string | undefined, allowed: readonly string[]): boolean {
   return value !== undefined && allowed.includes(value);
+}
+
+function bcaRouteOk(bankCode: string | undefined, transferType: string | undefined): boolean {
+  if (!isBankCode(bankCode) || !isMember(transferType, BCA_TRANSFER_TYPES)) return false;
+  if (transferType === "RTGS" || transferType === "BIFAST") return true;
+  if (transferType === "BCA") return bankCode === "014";
+  if (transferType === "LLG") return bankCode !== "014";
+  return false;
+}
+
+function bniRouteOk(bankCode: string | undefined, transferType: string | undefined): boolean {
+  if (!isBankCode(bankCode) || !isMember(transferType, BNI_TRANSFER_TYPES)) return false;
+  if (transferType === "RTGS" || transferType === "LLG") return true;
+  if (transferType === "INHOUSE") return bankCode === "009";
+  if (transferType === "SKN") return bankCode !== "009";
+  return false;
 }
 
 function failed(

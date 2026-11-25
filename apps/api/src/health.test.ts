@@ -25,6 +25,19 @@ describe("health routes", () => {
     });
   });
 
+  it("trusts one forwarded hop by default", async () => {
+    const app = await buildServer({ checkReady: async () => {} });
+    apps.push(app);
+    app.get("/who", async (request) => ({ ip: request.ip }));
+    const response = await app.inject({
+      method: "GET",
+      url: "/who",
+      headers: { "x-forwarded-for": "203.0.113.9" },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().ip, "203.0.113.9");
+  });
+
   it("returns 503 from readyz when the check fails and 200 when it passes", async () => {
     const down = await buildServer({
       checkReady: async () => {

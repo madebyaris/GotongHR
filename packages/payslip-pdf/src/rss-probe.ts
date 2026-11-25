@@ -30,10 +30,19 @@ function delay(ms: number): Promise<void> {
 interface Sampler {
   arm: (hwmBefore: number) => Promise<void>;
   stop: () => Promise<number>;
+  close: () => Promise<void>;
 }
 
 function openSampler(): Promise<Sampler> {
   const worker = new Worker(new URL("./rss-sampler.js", import.meta.url));
+  let closed = false;
+  const close = async (): Promise<void> => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    await worker.terminate();
+  };
   return new Promise((resolve, reject) => {
     const onStartupError = (error: Error) => {
       reject(error);
@@ -63,13 +72,14 @@ function openSampler(): Promise<Sampler> {
                 return;
               }
               worker.off("message", onMessage);
-              void worker.terminate().then(() => done(message), fail);
+              void close().then(() => done(message), fail);
             };
             worker.on("message", onMessage);
             worker.once("error", fail);
             worker.postMessage({ type: "stop" });
           });
         },
+        close,
       });
     });
   });
@@ -84,25 +94,29 @@ async function main(): Promise<void> {
   collectGarbage();
 
   const sampler = await openSampler();
-  collectGarbage();
-  await delay(20);
-  collectGarbage();
+  try {
+    collectGarbage();
+    await delay(20);
+    collectGarbage();
 
-  const baseline = readVm("VmRSS");
-  const hwmBefore = readVm("VmHWM");
-  process.stdout.write(`BASELINE ${baseline}\n`);
-  await sampler.arm(hwmBefore);
+    const baseline = readVm("VmRSS");
+    const hwmBefore = readVm("VmHWM");
+    process.stdout.write(`BASELINE ${baseline}\n`);
+    await sampler.arm(hwmBefore);
 
-  const pdf = await generatePayslipPdf(payslip, password);
-  const rssAfter = readVm("VmRSS");
-  const hwmAfter = readVm("VmHWM");
-  const sampled = await sampler.stop();
-  const peak = Math.max(rssAfter, sampled, hwmAfter > hwmBefore ? hwmAfter : 0);
-  const delta = peak - baseline;
-  process.stdout.write(
-    `RESULT ${JSON.stringify({ baseline, peak, delta, bytes: pdf.byteLength, hwmBefore, hwmAfter, sampled, rssAfter })}\n`,
-  );
-  await delay(30);
+    const pdf = await generatePayslipPdf(payslip, password);
+    const rssAfter = readVm("VmRSS");
+    const hwmAfter = readVm("VmHWM");
+    const sampled = await sampler.stop();
+    const peak = Math.max(rssAfter, sampled, hwmAfter > hwmBefore ? hwmAfter : 0);
+    const delta = peak - baseline;
+    process.stdout.write(
+      `RESULT ${JSON.stringify({ baseline, peak, delta, bytes: pdf.byteLength, hwmBefore, hwmAfter, sampled, rssAfter })}\n`,
+    );
+    await delay(30);
+  } finally {
+    await sampler.close();
+  }
 }
 
 main().catch((error: unknown) => {

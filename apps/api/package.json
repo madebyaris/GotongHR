@@ -7,16 +7,20 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/storage build",
-    "test": "node --experimental-strip-types --test --test-reporter spec src/*.test.ts",
+    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/storage build && pnpm --filter @gotonghr/identity build",
+    "prebootstrap": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/identity build",
+    "bootstrap": "node --experimental-strip-types src/entrypoints/bootstrap.ts",
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/*.test.ts",
     "start": "node dist/entrypoints/monolith.js"
   },
   "dependencies": {
     "@gotonghr/contracts": "workspace:*",
     "@gotonghr/db": "workspace:*",
+    "@gotonghr/identity": "workspace:*",
     "@gotonghr/storage": "workspace:*",
     "fastify": "5.12.8",
     "fastify-type-provider-zod": "7.0.0",
+    "pg": "8.23.1",
     "pg-boss": "12.39.0",
     "zod": "4.6.7"
   },
@@ -24,7 +28,6 @@
     "@types/node": "22.20.6",
     "@types/pg": "8.23.1",
     "eslint": "10.15.0",
-    "pg": "8.23.1",
     "typescript": "5.9.3"
   }
 }
