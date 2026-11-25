@@ -43,6 +43,7 @@ export const attClockEvents = pgTable(
     reviewReasonsJson: jsonb("review_reasons_json").notNull().default(sql`'[]'::jsonb`),
     reviewedBy: uuid("reviewed_by"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true, mode: "date" }),
+    reviewNote: text("review_note"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow(),
   },

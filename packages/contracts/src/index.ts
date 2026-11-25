@@ -18,6 +18,33 @@ export type {
   EmploymentStatus,
   PiiRevealInput,
 } from "./employees.ts";
+export {
+  bpjsFlagKeys,
+  emptyBpjsFlags,
+  isRealIsoDate,
+  parseCompensationCreate,
+  parseContractCreate,
+  parseDepartmentCreate,
+  parseDepartmentPatch,
+  parsePositionCreate,
+  parsePositionPatch,
+} from "./org-structure.ts";
+export type {
+  BpjsFlagKey,
+  BpjsFlags,
+  CompensationCreateInput,
+  CompensationProfileRecord,
+  ContractInput,
+  ContractRecord,
+  ContractStatus,
+  ContractType,
+  DepartmentInput,
+  DepartmentPatch,
+  DepartmentRecord,
+  PositionInput,
+  PositionPatch,
+  PositionRecord,
+} from "./org-structure.ts";
 export { idr } from "./idr.ts";
 export type { Idr } from "./idr.ts";
 export {

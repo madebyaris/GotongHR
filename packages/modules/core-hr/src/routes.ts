@@ -23,6 +23,7 @@ import {
 } from "./errors.ts";
 import { getEmployee, listEmployees } from "./read.ts";
 import { revealEmployeePii } from "./reveal.ts";
+import { registerOrgRoutes } from "./org/routes.ts";
 import { createEmployee, updateEmployee } from "./write.ts";
 
 const uuid =
@@ -85,6 +86,8 @@ export async function registerCoreHr(app: FastifyInstance, deps: CoreHrRouteDeps
       );
     },
   );
+
+  await registerOrgRoutes(app, deps);
 }
 
 async function run(

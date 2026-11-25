@@ -160,7 +160,18 @@ async function clearOwnerTotp(existing?: pg.Client): Promise<void> {
 async function resetEmployees(): Promise<void> {
   const client = await openSuperuser();
   try {
-    await client.query("TRUNCATE TABLE hr_employee_pii, hr_employees");
+    await client.query(
+      `TRUNCATE TABLE
+         att_clock_events,
+         hr_contract_expiry_notices,
+         hr_compensation_profiles,
+         hr_contracts,
+         hr_documents,
+         hr_employee_pii,
+         hr_employees,
+         hr_positions,
+         hr_departments`,
+    );
     await client.query("DELETE FROM aud_pii_access_logs WHERE reason = 'BPJS registration'");
     await clearOwnerTotp(client);
   } finally {

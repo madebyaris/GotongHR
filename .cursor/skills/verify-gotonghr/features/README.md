@@ -46,5 +46,6 @@ Each feature file starts with an H1 and one paragraph. Then it has these H2 sect
 - [Reveal PII and see an audit row from a second read](./04-pii-reveal-audit-row.md)
 - [Open the ESS bootstrap](./05-ess-bootstrap.md)
 - [Clock in offline and sync once](./06-ess-offline-clock.md)
+- [Review a flagged punch in the anomaly inbox](./07-anomaly-inbox.md)
 
-`/admin/assistant` is outside this map. `verify.sh drive` still runs feature 03. Features 05 and 06 are driven by `apps/web/e2e/ess-offline.spec.ts`.
+`/admin/assistant` is outside this map. `verify.sh drive` still runs feature 03. Features 05 and 06 are driven by `apps/web/e2e/ess-offline.spec.ts`. `/admin/anomalies` is feature 07.
