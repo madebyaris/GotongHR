@@ -1,5 +1,6 @@
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
 import type { DomainActionExecutor } from "@gotonghr/contracts";
+import { registerCoreHr } from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
   createTenantDatabase,
@@ -14,6 +15,7 @@ import {
   readAuthSecret,
   readTrustProxy,
   registerIdentity,
+  requirePermission,
   type GotongAuth,
 } from "@gotonghr/identity";
 import {
@@ -83,6 +85,27 @@ export async function composeFromEnv(
     });
     const auth = createAuth({ appDb, env });
     await registerIdentity(app, { auth, appDb, env });
+    await registerCoreHr(app, {
+      appDb,
+      guard: (permission) => requirePermission(permission),
+      readAuth(request) {
+        const auth = request.gotongAuth;
+        if (!auth) return null;
+        const agent = request.headers["user-agent"];
+        return {
+          tenantId: auth.tenantId,
+          userId: auth.userId,
+          role: auth.role,
+          permissions: auth.permissions,
+          scopeEntityIds: auth.scopeEntityIds,
+          scopeBranchIds: auth.scopeBranchIds,
+          directReportsOnly: auth.directReportsOnly,
+          selfOnly: auth.selfOnly,
+          ipAddress: request.ip || null,
+          userAgent: typeof agent === "string" ? agent : null,
+        };
+      },
+    });
     await registerTenantAi(app, {
       database: appDb,
       env,

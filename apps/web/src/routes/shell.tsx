@@ -40,7 +40,7 @@ export function TextField({
   readOnly: boolean;
   inputMode: "text" | "numeric" | "decimal";
   autoComplete: string;
-  type?: "text" | "email";
+  type?: "text" | "email" | "date";
 }) {
   return (
     <div className="mt-4">

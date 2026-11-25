@@ -1,5 +1,23 @@
 export { fail, failWithFields, ok } from "./envelope.ts";
 export type { ApiEnvelope, ApiError, ApiFailure, ApiSuccess, FieldIssue } from "./envelope.ts";
+export {
+  employeePiiFields,
+  employmentStatuses,
+  isEmployeePiiField,
+  parseEmployeeCreate,
+  parseEmployeeNik,
+  parseEmployeeNpwp,
+  parseEmployeePatch,
+  parsePiiReveal,
+} from "./employees.ts";
+export type {
+  EmployeeCreateInput,
+  EmployeePatch,
+  EmployeePiiField,
+  EmployeeRecord,
+  EmploymentStatus,
+  PiiRevealInput,
+} from "./employees.ts";
 export { idr } from "./idr.ts";
 export type { Idr } from "./idr.ts";
 export {

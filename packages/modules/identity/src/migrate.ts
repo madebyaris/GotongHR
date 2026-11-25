@@ -74,7 +74,7 @@ export async function migrateIdentity(input: IdentityMigrateInput): Promise<void
         await admin.query(`REVOKE ALL ON FUNCTION ${fn.signature} FROM ${QUEUE_ROLE}`);
         await admin.query(`GRANT EXECUTE ON FUNCTION ${fn.signature} TO ${APP_ROLE}`);
       }
-      await grantKnowledgeAtoms(admin);
+      await grantAddedAtoms(admin);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");
@@ -85,11 +85,19 @@ export async function migrateIdentity(input: IdentityMigrateInput): Promise<void
   }
 }
 
-const knowledgeAtoms = ["ai.knowledge.read", "ai.knowledge.write"] as const satisfies readonly PermissionAtom[];
+const addedAtoms = [
+  "employee.read",
+  "employee.write",
+  "ai.knowledge.read",
+  "ai.knowledge.write",
+] as const satisfies readonly PermissionAtom[];
 
-/** Adds the knowledge atoms to built-in roles that the seed now includes. It does not remove atoms. */
-async function grantKnowledgeAtoms(admin: pg.Client): Promise<void> {
-  for (const atom of knowledgeAtoms) {
+/**
+ * Adds atoms that later slices introduced. The table owner cannot see
+ * `id_roles` under FORCE RLS, so this runs as superuser. It does not remove atoms.
+ */
+async function grantAddedAtoms(admin: pg.Client): Promise<void> {
+  for (const atom of addedAtoms) {
     const codes = roleCodes.filter((code) => rolePermissions[code].some((item) => item === atom));
     if (codes.length === 0) continue;
     await admin.query(
@@ -384,6 +392,22 @@ COMMENT ON COLUMN id_branches.geofence_lat IS 'Geofence latitude. API field lati
 COMMENT ON COLUMN id_branches.geofence_lng IS 'Geofence longitude. API field longitude.';
 COMMENT ON COLUMN id_branches.geofence_radius_m IS 'Geofence radius in meters. API field geofenceRadiusM.';
 COMMENT ON COLUMN id_branches.ump_umk_idr IS 'UMP or UMK floor in integer rupiah. API field umpUmkIdr, JSON string.';
+
+UPDATE id_roles AS roles
+SET permissions = (
+  SELECT ARRAY(
+    SELECT DISTINCT item
+    FROM unnest(roles.permissions || seed.atoms) AS item
+  )
+)
+FROM (VALUES
+  ('org_owner', ARRAY['employee.read', 'employee.write']::text[]),
+  ('hr_admin', ARRAY['employee.read', 'employee.write']::text[]),
+  ('payroll_admin', ARRAY['employee.read']::text[]),
+  ('it_security_admin', ARRAY['employee.read']::text[])
+) AS seed(code, atoms)
+WHERE roles.code = seed.code
+  AND NOT (roles.permissions @> seed.atoms);
 `;
 
 /**

@@ -32,6 +32,8 @@ const requiredTenantTables = [
   "aud_outbox_events",
   "aud_pii_access_logs",
   "aud_tenant_keys",
+  "hr_employee_pii",
+  "hr_employees",
   "hr_secret",
   "id_branches",
   "id_legal_entities",
@@ -49,6 +51,8 @@ const platformDeniedTables = [
   "ai_conversations",
   "ai_knowledge_chunks",
   "ai_messages",
+  "hr_employee_pii",
+  "hr_employees",
   "hr_secret",
   "att_secret",
   "pay_run",
@@ -224,6 +228,8 @@ describe("tenant isolation", { concurrency: 1 }, () => {
     );
     const deleteTargets = [
       "ai_knowledge_chunks",
+      "hr_employee_pii",
+      "hr_employees",
       "ai_messages",
       "ai_action_proposals",
       "ai_conversations",
@@ -626,6 +632,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const attB = randomUUID();
   const payA = randomUUID();
   const payB = randomUUID();
+  const employeeA = randomUUID();
+  const employeeB = randomUUID();
+  const employeePiiA = randomUUID();
+  const employeePiiB = randomUUID();
   const conversationA = randomUUID();
   const conversationB = randomUUID();
   const messageA = randomUUID();
@@ -741,6 +751,30 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       [probeA, probeB, tenantA, tenantB],
     );
     await superuser.query(
+      `INSERT INTO hr_employees (
+         id, tenant_id, employee_code, full_name, legal_entity_id, branch_id,
+         employment_status, join_date, ptkp_status, tax_method, pph21_subject_type
+       ) VALUES
+         ($1, $3, 'A001', 'Employee A', $5, $7, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent'),
+         ($2, $4, 'B001', 'Employee B', $6, $8, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent')`,
+      [employeeA, employeeB, tenantA, tenantB, entityA, entityB, branchA, branchB],
+    );
+    await superuser.query(
+      `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask) VALUES
+         ($1, $3, $5, 'sealed-ciphertext-value-aaaa', $7, '3273********0001'),
+         ($2, $4, $6, 'sealed-ciphertext-value-bbbb', $8, '3273********0001')`,
+      [
+        employeePiiA,
+        employeePiiB,
+        tenantA,
+        tenantB,
+        employeeA,
+        employeeB,
+        "a".repeat(64),
+        "b".repeat(64),
+      ],
+    );
+    await superuser.query(
       `INSERT INTO hr_secret (id, tenant_id, marker) VALUES ($1, $3, 'a'), ($2, $4, 'b')`,
       [hrA, hrB, tenantA, tenantB],
     );
@@ -807,6 +841,8 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["aud_outbox_events", { a: outboxA, b: outboxB }],
       ["aud_pii_access_logs", { a: piiA, b: piiB }],
       ["aud_tenant_keys", { a: keyA, b: keyB }],
+      ["hr_employee_pii", { a: employeePiiA, b: employeePiiB }],
+      ["hr_employees", { a: employeeA, b: employeeB }],
       ["hr_secret", { a: hrA, b: hrB }],
       ["id_branches", { a: branchA, b: branchB }],
       ["id_legal_entities", { a: entityA, b: entityB }],
@@ -834,6 +870,8 @@ async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   await superuser.query("DELETE FROM sys_platform_audit_events WHERE target_tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM sys_support_grants WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM hr_employee_pii WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM hr_employees WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   for (const table of standIns) {
     await superuser.query(`DELETE FROM ${table} WHERE tenant_id = ANY($1::uuid[])`, [tenants]);
   }

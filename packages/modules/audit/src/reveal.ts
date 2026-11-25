@@ -9,7 +9,7 @@ import { readTenantSecrets } from "./keys.ts";
 import { assertUuid, queryRows } from "./sql.ts";
 import { assertSameTenant } from "./tenant.ts";
 
-export { SupportGrantPiiDeniedError } from "./errors.ts";
+export { PiiRevealDeniedError, PiiRevealReasonError, SupportGrantPiiDeniedError } from "./errors.ts";
 
 declare const revealedBrand: unique symbol;
 declare const ciphertextBrand: unique symbol;

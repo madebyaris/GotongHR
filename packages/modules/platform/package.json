@@ -27,6 +27,7 @@
   "devDependencies": {
     "@gotonghr/ai": "workspace:*",
     "@gotonghr/audit": "workspace:*",
+    "@gotonghr/core-hr": "workspace:*",
     "@gotonghr/crypto": "workspace:*",
     "@gotonghr/identity": "workspace:*",
     "@types/node": "22.20.6",
