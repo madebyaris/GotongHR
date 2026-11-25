@@ -38,6 +38,7 @@ services:
       APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD}
       PLATFORM_PASSWORD: ${PLATFORM_PASSWORD:?Set PLATFORM_PASSWORD}
       QUEUE_PASSWORD: ${QUEUE_PASSWORD:?Set QUEUE_PASSWORD}
+    mem_limit: 256m
     restart: "no"
     depends_on:
       postgres:

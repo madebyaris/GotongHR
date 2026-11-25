@@ -1,7 +1,7 @@
-import { grantSchemaDml, QUEUE_ROLE } from "@gotonghr/db";
+import { grantSchemaDml, QUEUE_ROLE, QUEUE_SCHEMA } from "@gotonghr/db";
 import { PgBoss } from "pg-boss";
 
-export const BOSS_SCHEMA = "pgboss";
+export const BOSS_SCHEMA = QUEUE_SCHEMA;
 export const MAINTENANCE_QUEUE = "gotong.maintenance";
 
 /** pg-boss 12 deletes completed jobs in place. It has no archive table. */
@@ -37,14 +37,19 @@ export async function startBoss(
   boss.on("error", (error: Error) => {
     process.stderr.write(`${JSON.stringify({ msg: "pg-boss error", error: error.message })}\n`);
   });
-  await boss.start();
-  const existing = await boss.getQueue(MAINTENANCE_QUEUE);
-  if (existing) {
-    await boss.updateQueue(MAINTENANCE_QUEUE, queueDefaults());
-  } else {
-    await boss.createQueue(MAINTENANCE_QUEUE, queueDefaults());
+  try {
+    await boss.start();
+    const existing = await boss.getQueue(MAINTENANCE_QUEUE);
+    if (existing) {
+      await boss.updateQueue(MAINTENANCE_QUEUE, queueDefaults());
+    } else {
+      await boss.createQueue(MAINTENANCE_QUEUE, queueDefaults());
+    }
+    return boss;
+  } catch (error) {
+    await boss.stop({ graceful: false, close: true }).catch(() => undefined);
+    throw error;
   }
-  return boss;
 }
 
 /** Creates the pg-boss schema as the migrator, then grants DML to gotong_queue. */

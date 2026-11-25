@@ -17,6 +17,7 @@ test("s3 presignPut returns a presigned POST with a content-length cap", async (
   });
   assert.equal(signed.method, "POST");
   assert.match(signed.url, /gotonghr-test/);
+  assert.equal(signed.fields?.key, "tenant/a.webp");
   assert.equal(signed.fields?.["Content-Type"], "image/webp");
   const policyField = signed.fields?.Policy ?? signed.fields?.policy;
   assert.ok(policyField);

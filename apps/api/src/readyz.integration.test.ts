@@ -16,7 +16,7 @@ describe("readyz against postgres", { concurrency: 1 }, () => {
   before(async () => {
     process.env.NODE_ENV = "test";
     process.env.STORAGE_DRIVER ??= "local";
-    process.env.STORAGE_LOCAL_SECRET = "local-test-storage-secret";
+    process.env.STORAGE_LOCAL_SECRET = "local-test-storage-secret-0123456789";
     process.env.QUEUE_DRIVER ??= "pgboss";
     await migrate(migrateEnvFrom(process.env));
     await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));

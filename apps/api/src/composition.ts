@@ -31,6 +31,7 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
   const boss = await startBoss(requiredEnv(env, "DATABASE_URL_QUEUE"));
   const storage = createStorage(env);
   let closed = false;
+  let closing: Promise<void> | undefined;
   const app = await buildServer({
     logger: env.NODE_ENV !== "test",
     storage,
@@ -51,13 +52,26 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
     config,
     appDb,
     boss,
-    async close() {
-      if (closed) return;
-      closed = true;
-      await app.close();
-      await boss.stop({ graceful: true, close: true });
-      await appDb.end();
-      await platformDb.end();
+    close() {
+      closing ??= (async () => {
+        closed = true;
+        const failures: unknown[] = [];
+        for (const step of [
+          () => app.close(),
+          () => boss.stop({ graceful: true, close: true }),
+          () => appDb.end(),
+          () => platformDb.end(),
+        ]) {
+          try {
+            await step();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        const first = failures[0];
+        if (first) throw first;
+      })();
+      return closing;
     },
   };
 }

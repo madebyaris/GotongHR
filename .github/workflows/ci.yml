@@ -41,7 +41,7 @@ jobs:
       DATABASE_URL_PLATFORM: postgres://platform_admin:platform@127.0.0.1:5432/gotonghr
       DATABASE_URL_QUEUE: postgres://gotong_queue:queue@127.0.0.1:5432/gotonghr
       STORAGE_DRIVER: local
-      STORAGE_LOCAL_SECRET: ci-secret
+      STORAGE_LOCAL_SECRET: ci-storage-secret-0123456789abcdef
       QUEUE_DRIVER: pgboss
       GOTONG_ROLE: monolith
       GOTONG_DEPLOYMENT_MODE: single_tenant

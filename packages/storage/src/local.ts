@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -37,6 +37,44 @@ function envelope(reply: FastifyReply, status: number, code: string, message: st
     meta: null,
     error: { code, message },
   });
+}
+
+const partialUploadName = /\.[0-9a-f]{16}\.partial$/;
+const MAX_PARTIAL_SWEEP = 200;
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+/** Removes crash leftovers. A startup sweep only sees uploads that did not finish. */
+async function sweepPartialUploads(rootDir: string): Promise<void> {
+  const root = path.resolve(rootDir);
+  let removed = 0;
+  const pending = [root];
+  while (pending.length > 0 && removed < MAX_PARTIAL_SWEEP) {
+    const dir = pending.pop();
+    if (!dir) break;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (isMissing(error)) continue;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (entry.name === "." || entry.name === "..") continue;
+      const resolved = path.resolve(dir, entry.name);
+      if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) continue;
+      if (entry.isDirectory()) {
+        pending.push(resolved);
+        continue;
+      }
+      if (!entry.isFile() || !partialUploadName.test(entry.name)) continue;
+      await rm(resolved, { force: true });
+      removed += 1;
+      if (removed >= MAX_PARTIAL_SWEEP) break;
+    }
+  }
 }
 
 function claimsFromQuery(
@@ -98,6 +136,7 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
       await rm(resolveObjectPath(rootDir, input.key), { force: true });
     },
     async registerRoutes(app) {
+      await sweepPartialUploads(rootDir);
       await app.register(async (scope) => {
         scope.removeAllContentTypeParsers();
         scope.addContentTypeParser(

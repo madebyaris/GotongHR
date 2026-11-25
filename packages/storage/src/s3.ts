@@ -20,7 +20,8 @@ export interface S3ObjectStorage extends ObjectStorage {
 }
 
 function lifetime(expiresInSeconds: number | undefined): number {
-  return tokenExpiry(expiresInSeconds) - Math.floor(Date.now() / 1000);
+  const now = Date.now();
+  return tokenExpiry(expiresInSeconds, now) - Math.floor(now / 1000);
 }
 
 export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {

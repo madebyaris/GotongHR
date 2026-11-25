@@ -8,6 +8,8 @@ export { createS3Storage, type S3ObjectStorage, type S3StorageOptions } from "./
 export { MAX_UPLOAD_BYTES } from "./types.ts";
 export type { ObjectStorage, PresignPutInput, PresignedGet, PresignedPut } from "./types.ts";
 
+const MIN_STORAGE_SECRET_LENGTH = 32;
+
 const blockedStorageSecrets = new Set([
   "change-me",
   "changeme",
@@ -19,8 +21,11 @@ const blockedStorageSecrets = new Set([
 
 function storageSecret(value: string | undefined): string {
   const secret = requiredText(value, "STORAGE_LOCAL_SECRET");
-  if (blockedStorageSecrets.has(secret)) {
+  if (blockedStorageSecrets.has(secret.toLowerCase())) {
     throw new Error("STORAGE_LOCAL_SECRET is a placeholder.");
+  }
+  if (secret.length < MIN_STORAGE_SECRET_LENGTH) {
+    throw new Error(`STORAGE_LOCAL_SECRET must be at least ${MIN_STORAGE_SECRET_LENGTH} characters.`);
   }
   return secret;
 }

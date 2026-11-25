@@ -32,7 +32,9 @@ export function resolveObjectPath(rootDir: string, key: string): string {
 export function tokenExpiry(expiresInSeconds: number | undefined, now = Date.now()): number {
   const ttl = expiresInSeconds ?? MAX_TOKEN_TTL_SECONDS;
   if (!Number.isInteger(ttl) || ttl < 1 || ttl > MAX_TOKEN_TTL_SECONDS) {
-    throw new Error("Token lifetime must be a whole number of seconds up to 900.");
+    throw new Error(
+      `Token lifetime must be a whole number of seconds up to ${MAX_TOKEN_TTL_SECONDS}.`,
+    );
   }
   return Math.floor(now / 1000) + ttl;
 }

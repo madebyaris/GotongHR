@@ -7,12 +7,18 @@ export interface PresignPutInput {
   expiresInSeconds?: number;
 }
 
-export interface PresignedPut {
-  url: string;
-  method: "PUT" | "POST";
-  headers: Record<string, string>;
-  fields?: Record<string, string>;
-}
+export type PresignedPut =
+  | {
+      url: string;
+      method: "PUT";
+      headers: Record<string, string>;
+    }
+  | {
+      url: string;
+      method: "POST";
+      headers: Record<string, string>;
+      fields: Record<string, string>;
+    };
 
 export interface PresignedGet {
   url: string;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, it, mock } from "node:test";
@@ -164,6 +164,24 @@ describe("local object storage", () => {
     );
     await app.close();
   });
+
+  it("removes leftover partial uploads when routes register", async () => {
+    const directory = path.join(root, "tenant");
+    await mkdir(directory, { recursive: true });
+    const kept = path.join(directory, "kept.txt");
+    const partial = path.join(directory, "kept.txt.abcdabcdabcdabcd.partial");
+    const namedPartial = path.join(directory, "notes.partial");
+    await writeFile(kept, "kept");
+    await writeFile(partial, "orphan");
+    await writeFile(namedPartial, "keep-me");
+    const storage = createLocalStorage({ rootDir: root, secret: "test-secret", urlPrefix: "" });
+    const app = Fastify({ logger: false });
+    await storage.registerRoutes(app);
+    await assert.rejects(stat(partial));
+    assert.equal(await readFile(kept, "utf8"), "kept");
+    assert.equal(await readFile(namedPartial, "utf8"), "keep-me");
+    await app.close();
+  });
 });
 
 function signedToken(payload: unknown, secret: string): string {
@@ -178,6 +196,26 @@ describe("storage configuration", () => {
       () => createStorage({ STORAGE_DRIVER: "local", STORAGE_LOCAL_SECRET: "change-me" }),
       /placeholder/,
     );
+    assert.throws(
+      () => createStorage({ STORAGE_DRIVER: "local", STORAGE_LOCAL_SECRET: "Change-Me" }),
+      /placeholder/,
+    );
+  });
+
+  it("rejects a short local secret and accepts a long one", () => {
+    assert.throws(
+      () =>
+        createStorage({
+          STORAGE_DRIVER: "local",
+          STORAGE_LOCAL_SECRET: "not-a-placeholder-but-short",
+        }),
+      /32/,
+    );
+    const storage = createStorage({
+      STORAGE_DRIVER: "local",
+      STORAGE_LOCAL_SECRET: "0123456789abcdef0123456789abcdef",
+    });
+    assert.equal(storage.kind, "local");
   });
 
   it("rejects half-set s3 credentials", () => {

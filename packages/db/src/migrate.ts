@@ -1,5 +1,5 @@
 import pg from "pg";
-import { assertProductionSecret, requiredEnv } from "./env.ts";
+import { assertProductionDatabaseSecrets, requiredEnv } from "./env.ts";
 import { tenantIsolationPolicySql } from "./policy.ts";
 
 const { Client } = pg;
@@ -8,8 +8,7 @@ export const APP_ROLE = "app_tenant";
 export const PLATFORM_ROLE = "platform_admin";
 export const MIGRATOR_ROLE = "gotong_migrator";
 export const QUEUE_ROLE = "gotong_queue";
-
-const identifier = /^[a-z_][a-z0-9_]*$/;
+export const QUEUE_SCHEMA = "pgboss";
 
 export interface MigrateEnv {
   superuserUrl: string;
@@ -29,10 +28,7 @@ export function migrateEnvFrom(env: NodeJS.ProcessEnv): MigrateEnv {
     platformPassword: requiredEnv(env, "PLATFORM_PASSWORD"),
     queuePassword: requiredEnv(env, "QUEUE_PASSWORD"),
   };
-  assertProductionSecret("MIGRATOR_PASSWORD", input.migratorPassword);
-  assertProductionSecret("APP_PASSWORD", input.appPassword);
-  assertProductionSecret("PLATFORM_PASSWORD", input.platformPassword);
-  assertProductionSecret("QUEUE_PASSWORD", input.queuePassword);
+  assertProductionDatabaseSecrets(env);
   return input;
 }
 
@@ -138,26 +134,26 @@ export async function migrate(input: MigrateEnv): Promise<void> {
   }
 }
 
-/** Grants DML on an existing schema. The caller creates the schema first. */
+/** Grants the queue role DML on the pg-boss schema. The caller creates that schema first. */
 export async function grantSchemaDml(
   connectionString: string,
   schema: string,
   role: string,
 ): Promise<void> {
-  if (!identifier.test(schema) || !identifier.test(role)) {
-    throw new Error("Invalid schema grant.");
+  if (schema !== QUEUE_SCHEMA || role !== QUEUE_ROLE) {
+    throw new Error("Schema grants are limited to the queue schema.");
   }
   const client = new Client({ connectionString });
   await client.connect();
   try {
-    await client.query(`GRANT USAGE ON SCHEMA ${schema} TO ${role}`);
+    await client.query(`GRANT USAGE ON SCHEMA ${QUEUE_SCHEMA} TO ${QUEUE_ROLE}`);
     await client.query(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${schema} TO ${role}`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${QUEUE_SCHEMA} TO ${QUEUE_ROLE}`,
     );
     await client.query(
-      `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ${schema} TO ${role}`,
+      `GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA ${QUEUE_SCHEMA} TO ${QUEUE_ROLE}`,
     );
-    await client.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${schema} TO ${role}`);
+    await client.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ${QUEUE_SCHEMA} TO ${QUEUE_ROLE}`);
   } finally {
     await client.end();
   }

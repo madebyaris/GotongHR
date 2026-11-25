@@ -9,6 +9,7 @@ export {
   MIGRATOR_ROLE,
   PLATFORM_ROLE,
   QUEUE_ROLE,
+  QUEUE_SCHEMA,
   grantSchemaDml,
   migrate,
   migrateEnvFrom,

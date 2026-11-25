@@ -32,6 +32,14 @@ const placeholderSecrets = new Set([
   "change-me-queue",
 ]);
 
+const databaseUrlNames = [
+  "DATABASE_URL_SUPERUSER",
+  "DATABASE_URL_MIGRATOR",
+  "DATABASE_URL_APP",
+  "DATABASE_URL_PLATFORM",
+  "DATABASE_URL_QUEUE",
+] as const;
+
 /** Production refuses the passwords published in `.env.example`. */
 export function assertProductionSecret(name: string, value: string, mode = process.env.NODE_ENV): void {
   if (mode !== "production") return;
@@ -40,11 +48,43 @@ export function assertProductionSecret(name: string, value: string, mode = proce
   }
 }
 
+function databaseUrlPassword(name: string, value: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} is not a valid URL.`);
+  }
+  return parsed.password || undefined;
+}
+
+/** Checks discrete passwords and passwords already embedded in DATABASE_URL_*. */
+export function assertProductionDatabaseSecrets(env: NodeJS.ProcessEnv): void {
+  const mode = env.NODE_ENV;
+  for (const [name, value] of [
+    ["POSTGRES_PASSWORD", env.POSTGRES_PASSWORD],
+    ["MIGRATOR_PASSWORD", env.MIGRATOR_PASSWORD],
+    ["APP_PASSWORD", env.APP_PASSWORD],
+    ["PLATFORM_PASSWORD", env.PLATFORM_PASSWORD],
+    ["QUEUE_PASSWORD", env.QUEUE_PASSWORD],
+  ] as const) {
+    if (value) assertProductionSecret(name, value, mode);
+  }
+  for (const name of databaseUrlNames) {
+    const value = env[name];
+    if (!value) continue;
+    const password = databaseUrlPassword(name, value);
+    if (password) assertProductionSecret(name, password, mode);
+  }
+}
+
 /**
  * Fills DATABASE_URL_* from discrete host and password variables.
  * An existing URL is left unchanged. Passwords are percent-encoded.
+ * Production checks use `env.NODE_ENV`, including passwords already present in a URL.
  */
 export function applyDatabaseUrls(env: NodeJS.ProcessEnv): void {
+  assertProductionDatabaseSecrets(env);
   const host = env.POSTGRES_HOST;
   const database = env.POSTGRES_DB || "gotonghr";
   const pairs: Array<[string, string, string | undefined]> = [
@@ -54,20 +94,10 @@ export function applyDatabaseUrls(env: NodeJS.ProcessEnv): void {
     ["DATABASE_URL_PLATFORM", "platform_admin", env.PLATFORM_PASSWORD],
     ["DATABASE_URL_QUEUE", "gotong_queue", env.QUEUE_PASSWORD],
   ];
-  if (host) {
-    for (const [name, user, password] of pairs) {
-      if (env[name] || !password) continue;
-      env[name] =
-        `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}`;
-    }
-  }
-  for (const [name, value] of [
-    ["POSTGRES_PASSWORD", env.POSTGRES_PASSWORD],
-    ["MIGRATOR_PASSWORD", env.MIGRATOR_PASSWORD],
-    ["APP_PASSWORD", env.APP_PASSWORD],
-    ["PLATFORM_PASSWORD", env.PLATFORM_PASSWORD],
-    ["QUEUE_PASSWORD", env.QUEUE_PASSWORD],
-  ] as const) {
-    if (value) assertProductionSecret(name, value);
+  if (!host) return;
+  for (const [name, user, password] of pairs) {
+    if (env[name] || !password) continue;
+    env[name] =
+      `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:5432/${database}`;
   }
 }

@@ -12,7 +12,7 @@ corepack pnpm install
 cp .env.example .env
 ```
 
-Replace `STORAGE_LOCAL_SECRET` in `.env` before tests or a local boot. The database passwords in `.env.example` are local placeholders. `NODE_ENV=production` refuses those placeholders. Compose does not invent them.
+Replace `STORAGE_LOCAL_SECRET` in `.env` with at least 32 random characters before tests or a local boot. The value in `.env.example` is a placeholder. The database passwords in `.env.example` are local placeholders. `NODE_ENV=production` refuses those placeholders, including a placeholder password already embedded in a `DATABASE_URL_*` value. Compose does not invent them.
 
 ## Boot
 
@@ -68,4 +68,4 @@ Payslip PDF rendering is not part of this slice.
 
 ## Object storage
 
-A local token can cap an upload below 2 MB. Above the cap, the response is `too_large` and names that cap. S3 uploads use a presigned POST whose policy includes `content-length-range`. Set both `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, or set neither.
+A local token can cap an upload below 2 MB. A request within the 2 MB body limit that exceeds the token cap returns `too_large` and names that cap. A request larger than 2 MB is rejected by the body limit before that check. S3 uploads use a presigned POST whose policy includes `content-length-range`. Set both `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, or set neither.

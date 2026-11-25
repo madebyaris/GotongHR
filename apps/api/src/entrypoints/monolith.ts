@@ -1,4 +1,5 @@
 import { composeFromEnv } from "../composition.ts";
+import { runShutdown } from "../shutdown.ts";
 
 async function main(): Promise<void> {
   const composed = await composeFromEnv(process.env);
@@ -6,14 +7,7 @@ async function main(): Promise<void> {
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    void composed.close().then(
-      () => {
-        process.exit(0);
-      },
-      () => {
-        process.exit(1);
-      },
-    );
+    runShutdown(() => composed.close());
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);

@@ -1,5 +1,5 @@
 export { fail, ok } from "./envelope.ts";
-export type { ApiEnvelope, ApiError } from "./envelope.ts";
+export type { ApiEnvelope, ApiError, ApiFailure, ApiSuccess } from "./envelope.ts";
 export { idr } from "./idr.ts";
 export type { Idr } from "./idr.ts";
 export { isPermissionAtom, permissionAtoms } from "./permissions.ts";
