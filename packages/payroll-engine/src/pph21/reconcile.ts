@@ -2,7 +2,7 @@ import type { Idr, PtkpStatus } from "@gotonghr/contracts";
 import { civilDate, type CivilDate } from "../civil-date.ts";
 import { PayrollInputError } from "../errors.ts";
 import { nonNegativeRupiah, rupiah } from "../money.ts";
-import { assertTableCovers } from "../tables/select.ts";
+import { assertReadyForCalculation, assertTableCovers } from "../tables/select.ts";
 import type { StatutoryTable, TerCategory } from "../tables/types.ts";
 import { biayaJabatan } from "./biaya-jabatan.ts";
 import { pasal17Tax, roundPkpDown } from "./pasal17.ts";
@@ -21,6 +21,7 @@ export interface ReconcilePph21Input {
   readonly ytdEmployeeJp: Idr;
   readonly verifiedZakat: Idr;
   readonly ytdPph21Withheld: Idr;
+  readonly allowUndeclared?: boolean;
 }
 
 export interface ReconcilePph21Result {
@@ -60,13 +61,15 @@ export function reconcilePph21(input: ReconcilePph21Input): ReconcilePph21Result
     throw new PayrollInputError("activeMonths cannot exceed the payroll month.");
   }
   assertTableCovers(input.table, payrollDate);
+  const ready = input.allowUndeclared === true ? { allowUndeclared: true } : undefined;
+  assertReadyForCalculation(input.table, ready);
   const category = terCategoryForPtkp(input.ptkpStatus);
   const ytdGross = nonNegativeRupiah(input.ytdGrossTaxable, "ytdGrossTaxable");
   const ytdJht = nonNegativeRupiah(input.ytdEmployeeJht, "ytdEmployeeJht");
   const ytdJp = nonNegativeRupiah(input.ytdEmployeeJp, "ytdEmployeeJp");
   const zakat = nonNegativeRupiah(input.verifiedZakat, "verifiedZakat");
   const withheld = nonNegativeRupiah(input.ytdPph21Withheld, "ytdPph21Withheld");
-  const jabatan = biayaJabatan(input.table, ytdGross, input.activeMonths);
+  const jabatan = biayaJabatan(input.table, ytdGross, input.activeMonths, ready);
   const neto = rupiah(floorAtZero(ytdGross - jabatan - ytdJht - ytdJp - zakat));
   const ptkp = annualPtkp(input.table, input.ptkpStatus);
   const pkp = rupiah(roundPkpDown(floorAtZero(neto - ptkp)));

@@ -148,6 +148,20 @@ test("monthly TER on the draft throws instead of inventing a rate", () => {
         method: "gross",
         components: components(5_000_000n),
       }),
+    /draft statutory table/,
+  );
+  const published = structuredClone(readJson("../tables/id-2026.draft.json")) as Record<string, unknown>;
+  published.status = "published";
+  assert.throws(
+    () =>
+      calculateMonthlyPph21({
+        payrollDate: civilDate(2026, 1, 31),
+        periodMonth: 1,
+        table: parseStatutoryTable(published),
+        ptkpStatus: "TK/0",
+        method: "gross",
+        components: components(5_000_000n),
+      }),
     (error: unknown) => {
       assert.ok(error instanceof MissingStatutoryValueError);
       assert.equal(error.key, "ter.A");

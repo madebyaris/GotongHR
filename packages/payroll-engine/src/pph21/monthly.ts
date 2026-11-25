@@ -2,7 +2,7 @@ import type { Idr, PtkpStatus, TaxMethod } from "@gotonghr/contracts";
 import { civilDate, type CivilDate } from "../civil-date.ts";
 import { PayrollInputError } from "../errors.ts";
 import { rupiah } from "../money.ts";
-import { assertTableCovers } from "../tables/select.ts";
+import { assertReadyForCalculation, assertTableCovers } from "../tables/select.ts";
 import type { StatutoryTable, TerCategory } from "../tables/types.ts";
 import { grossTaxableOf, type GrossTaxableComponents } from "./gross-taxable.ts";
 import { solveGrossUp } from "./gross-up.ts";
@@ -16,6 +16,7 @@ export interface MonthlyPph21Input {
   readonly ptkpStatus: PtkpStatus;
   readonly method: TaxMethod;
   readonly components: GrossTaxableComponents;
+  readonly allowUndeclared?: boolean;
 }
 
 export interface MonthlyPph21Result {
@@ -58,6 +59,10 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
     throw new PayrollInputError("Tax method must be gross, nett, or gross_up.");
   }
   assertTableCovers(input.table, payrollDate);
+  assertReadyForCalculation(
+    input.table,
+    input.allowUndeclared === true ? { allowUndeclared: true } : undefined,
+  );
   const category = terCategoryForPtkp(input.ptkpStatus);
   const grossTaxable = grossTaxableOf(input.components);
   if (input.method === "gross") {

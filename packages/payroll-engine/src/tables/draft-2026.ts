@@ -5,6 +5,6 @@ import type { StatutoryTable } from "./types.ts";
 /**
  * The shipped 2026 draft, for inspection only.
  * It is not on the package's default export. TER rates, PTKP rupiah, and the JP cap are missing.
- * findTableForDate and biayaJabatan refuse it unless allowUndeclared is set.
+ * calculateMonthlyPph21, reconcilePph21, findTableForDate, and biayaJabatan refuse it unless allowUndeclared is set.
  */
 export const id2026DraftTable: StatutoryTable = parseStatutoryTable(raw);

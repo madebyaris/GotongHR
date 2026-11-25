@@ -157,8 +157,32 @@ test("exit and December use the same money result for the same inputs", () => {
         payrollDate: civilDate(2026, 6, 30),
         reason: "exit",
       }),
-    /activeMonths cannot exceed/,
+    { name: "PayrollInputError", message: /activeMonths cannot exceed/ },
   );
+});
+
+test("reconciliation refuses a draft unless allowUndeclared is set", () => {
+  const raw = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as Record<string, unknown>;
+  raw.status = "draft";
+  const draft = parseStatutoryTable(raw);
+  const input = {
+    payrollDate: civilDate(2026, 6, 30),
+    reason: "exit" as const,
+    table: draft,
+    ptkpStatus: "TK/0" as const,
+    activeMonths: 6,
+    ytdGrossTaxable: rupiah(30_000_000n),
+    ytdEmployeeJht: rupiah(0n),
+    ytdEmployeeJp: rupiah(0n),
+    verifiedZakat: rupiah(0n),
+    ytdPph21Withheld: rupiah(500_000n),
+  };
+  assert.throws(() => reconcilePph21(input), {
+    name: "PayrollInputError",
+    message: /Pass allowUndeclared to calculate with it/,
+  });
+  const allowed = reconcilePph21({ ...input, allowUndeclared: true });
+  assert.equal(allowed.withholding, 875_000n);
 });
 
 test("reconciliation does not need TER rates and does not cap JP with a guessed number", () => {

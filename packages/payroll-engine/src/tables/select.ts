@@ -25,7 +25,7 @@ export function assertReadyForCalculation(
 ): void {
   if (table.status !== "draft" || options?.allowUndeclared === true) return;
   throw new PayrollInputError(
-    "A draft statutory table is not used for calculation. Pass allowUndeclared to inspect it.",
+    "A draft statutory table is not used for calculation. Pass allowUndeclared to calculate with it.",
   );
 }
 

@@ -226,6 +226,27 @@ test("a fixed point found on the last gross-up iteration is kept", () => {
   assert.equal(gap(solved.allowance, solved.tax), 0n);
 });
 
+test("monthly TER refuses a draft table with rates unless allowUndeclared is set", () => {
+  const raw = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as Record<string, unknown>;
+  raw.status = "draft";
+  const draft = parseStatutoryTable(raw);
+  const input = {
+    payrollDate: january,
+    periodMonth: 1,
+    table: draft,
+    ptkpStatus: "TK/0" as const,
+    method: "gross_up" as const,
+    components: components(5_000_000n),
+  };
+  assert.throws(() => calculateMonthlyPph21(input), {
+    name: "PayrollInputError",
+    message: /Pass allowUndeclared to calculate with it/,
+  });
+  const allowed = calculateMonthlyPph21({ ...input, allowUndeclared: true });
+  assert.equal(allowed.tax, 102_041n);
+  assert.equal(allowed.method, "gross_up");
+});
+
 test("monthly TER does not require a PTKP rupiah amount", () => {
   const raw = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as Record<string, unknown>;
   const amounts: Record<string, { source: string }> = {};
