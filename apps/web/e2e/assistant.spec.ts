@@ -25,9 +25,12 @@ test("admin confirms a proposal, reloads it, and leaves an audit row", async ({ 
   await signIn(page);
   await page.getByRole("link", { name: "Assistant" }).click();
   await expect(page.getByRole("heading", { name: "Assistant" })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("not official statute text");
   await expect(page.getByText("No messages yet.")).toBeVisible();
+  await shot(page, "slice-5-3-notice-wide.png");
   await shot(page, "slice-5-2-empty-wide.png");
   await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, "slice-5-3-notice-phone.png");
   await shot(page, "slice-5-2-empty-phone.png");
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -58,6 +61,19 @@ test("admin confirms a proposal, reloads it, and leaves an audit row", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, "slice-5-2-confirmed-phone.png");
   await expectAudit();
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByLabel("Message").fill("What does PP 58 say about withholding?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("summary:pp-58-2023")).toBeVisible();
+  await expect(page.getByText("not the statute").first()).toBeVisible();
+  await expect(page.getByText("The sources are short summaries.")).toBeVisible();
+  await shot(page, "slice-5-3-citation-wide.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, "slice-5-3-citation-phone.png");
+  await page.reload();
+  await expect(page.getByText("summary:pp-58-2023")).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("not official statute text");
 });
 
 async function resetAssistant(): Promise<void> {

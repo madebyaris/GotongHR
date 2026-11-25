@@ -1,3 +1,4 @@
+import { roleCodes, rolePermissions, type PermissionAtom } from "@gotonghr/contracts";
 import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE, tenantIsolationPolicySql } from "@gotonghr/db";
 import pg from "pg";
 
@@ -73,6 +74,7 @@ export async function migrateIdentity(input: IdentityMigrateInput): Promise<void
         await admin.query(`REVOKE ALL ON FUNCTION ${fn.signature} FROM ${QUEUE_ROLE}`);
         await admin.query(`GRANT EXECUTE ON FUNCTION ${fn.signature} TO ${APP_ROLE}`);
       }
+      await grantAddedAtoms(admin);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");
@@ -80,6 +82,31 @@ export async function migrateIdentity(input: IdentityMigrateInput): Promise<void
     }
   } finally {
     await admin.end();
+  }
+}
+
+const addedAtoms = [
+  "employee.read",
+  "employee.write",
+  "ai.knowledge.read",
+  "ai.knowledge.write",
+] as const satisfies readonly PermissionAtom[];
+
+/**
+ * Adds atoms that later slices introduced. The table owner cannot see
+ * `id_roles` under FORCE RLS, so this runs as superuser. It does not remove atoms.
+ */
+async function grantAddedAtoms(admin: pg.Client): Promise<void> {
+  for (const atom of addedAtoms) {
+    const codes = roleCodes.filter((code) => rolePermissions[code].some((item) => item === atom));
+    if (codes.length === 0) continue;
+    await admin.query(
+      `UPDATE id_roles
+       SET permissions = permissions || ARRAY[$1]::text[]
+       WHERE code = ANY($2::text[])
+         AND NOT ($1 = ANY(permissions))`,
+      [atom, codes],
+    );
   }
 }
 

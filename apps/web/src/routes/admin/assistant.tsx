@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { ApiRequestError, apiData } from "@/lib/api";
 import {
   maskSensitiveText,
+  policyCitations,
   streamAssistant,
   type AssistantProposal,
   type ConversationThread,
+  type PolicyCitation,
 } from "@/lib/assistant";
 import { AdminFrame } from "./frame";
 import { ProposalCard } from "./proposal-card";
@@ -27,7 +29,13 @@ interface CardTurn {
   error: string | null;
 }
 
-type ThreadTurn = Turn | CardTurn;
+interface CitationTurn {
+  id: string;
+  kind: "citations";
+  citations: PolicyCitation[];
+}
+
+type ThreadTurn = Turn | CardTurn | CitationTurn;
 
 export default function AssistantPage() {
   const navigate = useNavigate();
@@ -48,6 +56,9 @@ export default function AssistantPage() {
       <main className="mx-auto flex w-full max-w-xl flex-col px-4 py-6">
         <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
         <p className="mt-2 text-base text-muted-foreground">Ask for a change. Nothing is saved until you confirm it.</p>
+        <p className="mt-4 border-l-2 border-border pl-3 text-base text-muted-foreground" role="note">
+          Policy answers use short summaries. They are not official statute text, and the corpus is incomplete.
+        </p>
         {thread.isPending ? <p className="mt-6 text-base text-muted-foreground">Loading the thread…</p> : null}
         {thread.error && !(thread.error instanceof ApiRequestError && thread.error.status === 401) ? (
           <p className="mt-6 text-base" role="alert">
@@ -102,6 +113,15 @@ function Conversation({ initial }: { initial: ConversationThread }) {
         (item) => {
           if (item.type === "token") {
             setTurns((current) => appendToken(current, assistantId, item.text));
+          }
+          if (item.type === "tool" && item.name === "search_policy_knowledge") {
+            const citations = policyCitations(item.result);
+            if (citations.length > 0) {
+              setTurns((current) => [
+                ...current,
+                { id: `sources-${Date.now()}`, kind: "citations", citations },
+              ]);
+            }
           }
           if (item.type === "proposal") {
             rememberNonce(item.proposal);
@@ -187,7 +207,19 @@ function Conversation({ initial }: { initial: ConversationThread }) {
           <li className="text-base text-muted-foreground">No messages yet. The change you ask for shows up here.</li>
         ) : null}
         {turns.map((turn) =>
-          turn.kind === "proposal" ? (
+          turn.kind === "citations" ? (
+            <li key={turn.id} className="border border-border px-3 py-2">
+              <p className="text-sm font-medium text-muted-foreground">Sources</p>
+              <ul className="mt-2 flex flex-col gap-1">
+                {turn.citations.map((citation) => (
+                  <li key={citation.citationRef} className="break-all text-base">
+                    {citation.citationRef}
+                    {citation.notTheStatute ? <span className="text-muted-foreground"> · not the statute</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ) : turn.kind === "proposal" ? (
             <li key={turn.id}>
               <ProposalCard
                 proposal={turn.proposal}
@@ -240,6 +272,10 @@ function turnsFromThread(thread: ConversationThread): ThreadTurn[] {
     kind: message.role,
     text: message.content,
   }));
+  const sources: ThreadTurn[] =
+    thread.citations && thread.citations.length > 0
+      ? [{ id: "saved-sources", kind: "citations", citations: thread.citations }]
+      : [];
   const cards: ThreadTurn[] = thread.proposals.map((proposal) => {
     const nonce = proposal.confirmationNonce ?? readNonce(proposal.id);
     return {
@@ -249,7 +285,7 @@ function turnsFromThread(thread: ConversationThread): ThreadTurn[] {
       error: null,
     };
   });
-  return [...messages, ...cards];
+  return [...messages, ...sources, ...cards];
 }
 
 function appendToken(turns: ThreadTurn[], assistantId: string, text: string): ThreadTurn[] {

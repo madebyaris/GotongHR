@@ -23,7 +23,10 @@ async function main(): Promise<void> {
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
   await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAttendance({ migratorUrl: migrateEnv.migratorUrl });
-  await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateAi({
+    migratorUrl: migrateEnv.migratorUrl,
+    superuserUrl: migrateEnv.superuserUrl,
+  });
   await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
 }
 
