@@ -29,6 +29,8 @@ export interface RegisterIdentityOptions {
   env?: NodeJS.ProcessEnv;
   rateLimitMax?: number;
   rateLimitWindowMs?: number;
+  /** Company routes stay on the monolith. Role processes still mount sign-in. */
+  orgRoutes?: boolean;
 }
 
 export async function registerIdentity(
@@ -72,7 +74,7 @@ export async function registerIdentity(
       });
     }
     await scope.register(fastifyBetterAuth, { auth: options.auth });
-    await registerOrgRoutes(scope);
+    if (options.orgRoutes !== false) await registerOrgRoutes(scope);
   });
 }
 
