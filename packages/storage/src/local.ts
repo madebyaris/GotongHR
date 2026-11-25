@@ -52,6 +52,26 @@ function stagingDirectory(rootDir: string): string {
   return path.resolve(rootDir, STAGING_DIR_NAME);
 }
 
+/** A real directory only. `mkdir` follows a symlink that `lstat` would reject. */
+async function ensureStagingDirectory(rootDir: string): Promise<string> {
+  const dir = stagingDirectory(rootDir);
+  let info = await lstat(dir).catch((error: unknown) => {
+    if (isMissing(error)) return undefined;
+    throw error;
+  });
+  if (info && !info.isDirectory()) {
+    throw new Error("Upload staging path must be a directory.");
+  }
+  if (!info) {
+    await mkdir(dir, { recursive: true });
+    info = await lstat(dir);
+    if (!info.isDirectory()) {
+      throw new Error("Upload staging path must be a directory.");
+    }
+  }
+  return dir;
+}
+
 /** Removes crash leftovers from the staging directory only. */
 async function sweepPartialUploads(rootDir: string): Promise<void> {
   const dir = stagingDirectory(rootDir);
@@ -167,11 +187,8 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
               return envelope(reply, 413, "too_large", `Upload exceeds ${claims.maxBytes} bytes.`);
             }
             const destination = resolveObjectPath(rootDir, claims.key);
-            const temporary = path.join(
-              stagingDirectory(rootDir),
-              `${randomBytes(16).toString("hex")}.partial`,
-            );
-            await mkdir(stagingDirectory(rootDir), { recursive: true });
+            const staging = await ensureStagingDirectory(rootDir);
+            const temporary = path.join(staging, `${randomBytes(16).toString("hex")}.partial`);
             await mkdir(path.dirname(destination), { recursive: true });
             try {
               await writeFile(temporary, body);
