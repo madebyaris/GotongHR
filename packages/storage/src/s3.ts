@@ -1,4 +1,10 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { assertObjectKey, tokenExpiry } from "./keys.ts";
@@ -68,6 +74,23 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
         headers: {},
         fields: posted.fields,
       };
+    },
+    async put(input) {
+      assertObjectKey(input.key);
+      if (input.contentType.trim().length === 0) {
+        throw new Error("Content type is required.");
+      }
+      if (input.body.byteLength > MAX_UPLOAD_BYTES) {
+        throw new Error("Upload cap cannot exceed 2 MB.");
+      }
+      await client.send(
+        new PutObjectCommand({
+          Bucket: options.bucket,
+          Key: input.key,
+          Body: input.body,
+          ContentType: input.contentType,
+        }),
+      );
     },
     async presignGet(input) {
       assertObjectKey(input.key);

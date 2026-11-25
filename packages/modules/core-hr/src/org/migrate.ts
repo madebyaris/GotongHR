@@ -164,6 +164,11 @@ CREATE INDEX IF NOT EXISTS hr_positions_department_idx
   ON hr_positions (tenant_id, department_id);
 
 ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS manager_employee_id uuid;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS user_id uuid;
+ALTER TABLE hr_employees ADD COLUMN IF NOT EXISTS date_of_birth date;
+CREATE UNIQUE INDEX IF NOT EXISTS hr_employees_user_key
+  ON hr_employees (tenant_id, user_id)
+  WHERE user_id IS NOT NULL;
 
 DO $$
 BEGIN
@@ -345,6 +350,10 @@ COMMENT ON COLUMN hr_employees.position_id IS
   'Position. Null until HR assigns one. A contract link can set this.';
 COMMENT ON COLUMN hr_employees.manager_employee_id IS
   'Line manager in the same company. Null when the employee has no manager.';
+COMMENT ON COLUMN hr_employees.user_id IS
+  'Optional id_users id for the ESS payslip download. Null until the employee is linked.';
+COMMENT ON COLUMN hr_employees.date_of_birth IS
+  'Civil birth date. The payslip PDF password defaults to ddMMyyyy. Null until HR records it.';
 COMMENT ON COLUMN hr_compensation_profiles.base_salary_idr IS
   'Integer rupiah. Never updated in place. A later profile supersedes this row.';
 

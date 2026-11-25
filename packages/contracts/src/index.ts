@@ -100,6 +100,7 @@ export type {
   AttendancePayrollPort,
   AttendancePeriodSummaryDTO,
 } from "./attendance-payroll.port.ts";
+export type { StatutoryPayrollPort, StatutoryTableVersion } from "./statutory-payroll.port.ts";
 export type { AuditAppendPort, AuditEventDraft } from "./audit-append.port.ts";
 export type { DomainActionCommand, DomainActionExecutor } from "./domain-action.port.ts";
 export { supportPiiRevealDeny, supportPiiRevealSetting } from "./support-grant-audit.port.ts";

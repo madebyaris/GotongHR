@@ -4,6 +4,7 @@ import { migrateAudit } from "@gotonghr/audit";
 import { migrateCoreHr } from "@gotonghr/core-hr";
 import { migrate, migrateEnvFrom } from "@gotonghr/db";
 import { migrateIdentity } from "@gotonghr/identity";
+import { migratePayroll } from "@gotonghr/payroll";
 import { migratePlatform } from "./migrate.ts";
 
 /** Applies every tenant schema the isolation suite reads. Test support only. */
@@ -24,6 +25,7 @@ export async function applyTenantSchema(env: NodeJS.ProcessEnv = process.env): P
   await migrateClock({ migratorUrl: migrateEnv.migratorUrl });
   await migrateMobile({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAnomalies({ migratorUrl: migrateEnv.migratorUrl });
+  await migratePayroll({ migratorUrl: migrateEnv.migratorUrl });
   await migrateAi({
     migratorUrl: migrateEnv.migratorUrl,
     superuserUrl: migrateEnv.superuserUrl,

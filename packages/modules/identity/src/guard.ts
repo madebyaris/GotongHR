@@ -49,6 +49,7 @@ export type AuthResult =
 
 interface AuthOptions {
   permission?: PermissionAtom;
+  anyPermission?: readonly PermissionAtom[];
   orgWrite?: boolean;
 }
 
@@ -89,10 +90,8 @@ export async function authenticateRequest(
     return denied(403, "tenant_mismatch", "The tenant header does not match a membership.");
   }
   if (selected === "required") return denied(400, "tenant_required", "Choose a tenant.");
-  const permission = options?.permission;
-  if (permission && !selected.permissions.includes(permission)) {
-    return denied(403, "forbidden", "Missing permission.");
-  }
+  const permission = matchedPermission(selected.permissions, options);
+  if (permission === "missing") return denied(403, "forbidden", "Missing permission.");
   if (options?.orgWrite && !canWriteOrg(selected.role)) {
     return denied(403, "forbidden", "Only an owner or HR admin can change the company.");
   }
@@ -147,12 +146,27 @@ export function requirePermission(atom: PermissionAtom) {
   return requireAuth({ permission: atom });
 }
 
+export function requireAnyPermission(atoms: readonly PermissionAtom[]) {
+  return requireAuth({ anyPermission: atoms });
+}
+
 export function requireMember() {
   return requireAuth({});
 }
 
 export function requireOrgWriter() {
   return requireAuth({ orgWrite: true });
+}
+
+function matchedPermission(
+  held: readonly PermissionAtom[],
+  options: AuthOptions | undefined,
+): PermissionAtom | undefined | "missing" {
+  if (options?.anyPermission && options.anyPermission.length > 0) {
+    return options.anyPermission.find((atom) => held.includes(atom)) ?? "missing";
+  }
+  if (options?.permission && !held.includes(options.permission)) return "missing";
+  return options?.permission;
 }
 
 function requireAuth(options: AuthOptions) {
