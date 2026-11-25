@@ -22,6 +22,20 @@ docker compose --env-file .env -f docker/docker-compose.vps.yml up -d --build
 
 The shell is served at `http://localhost/`. Readiness is `http://localhost/api/readyz`. Compose reads variables from the repo-root `.env` only when `--env-file .env` is set, because the compose file lives in `docker/`. A one-shot `migrate` service applies roles and the queue schema, then exits. The API process does not connect as the database superuser.
 
+## Bootstrap
+
+`GOTONG_DEPLOYMENT_MODE=single_tenant` is the default. After migrate, create the one tenant and its `org_owner`:
+
+```bash
+pnpm --filter @gotonghr/api bootstrap
+```
+
+Set `GOTONG_BOOTSTRAP_EMAIL` and `GOTONG_BOOTSTRAP_PASSWORD` (12 to 128 characters). Run one bootstrap at a time. The command takes a Postgres advisory lock, so an overlapping run waits and then sees the existing tenant instead of creating a second one. The same email returns the existing tenant. A different email is refused. `NODE_ENV=production` refuses the placeholder auth secret, the placeholder bootstrap password, and a `BETTER_AUTH_URL` that is missing or not `https://`.
+
+`BETTER_AUTH_URL` is the browser origin, such as `http://localhost` behind Caddy. It is not the API bind address. Extra browser origins go in `GOTONG_TRUSTED_ORIGINS` as a comma-separated list. Sign-in is mounted at `/api/auth/*`. `/api/v1/platform/*` is not mounted. Session cookies are `HttpOnly`, `Secure`, and `SameSite=Lax`, so a browser stores them only after TLS terminates in front of the API.
+
+Sign-in, password reset, and the two-factor verification routes are limited separately, per IP. The defaults are 10 requests per 60 seconds. Override them with `GOTONG_AUTH_RATE_LIMIT_MAX` and `GOTONG_AUTH_RATE_LIMIT_WINDOW_MS`. `GOTONG_TRUST_PROXY` defaults to `1`: one forwarding hop, and only when the socket peer is loopback, link-local, or a private address. That assumes port 3000 is reachable only from Caddy or the Docker network. Set an address or CIDR list when it is not. `true` is rejected. `CF-Connecting-IP` is used only when `GOTONG_TRUST_CLOUDFLARE=true` and the socket peer is a trusted proxy, which requires Cloudflare Tunnel or Authenticated Origin Pulls.
+
 Postgres is published on `127.0.0.1:5432` and the API on `127.0.0.1:3000`. Caddy publishes port 80. TLS is not configured in this slice: the Phase 0 checks use HTTP until a hostname exists.
 
 The 1 GB profile tightens the same stack:
