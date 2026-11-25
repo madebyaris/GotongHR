@@ -527,8 +527,8 @@ describe("platform admin", { concurrency: 1 }, () => {
     assert.equal(readError(closed.body), "grant_revoked");
 
     const draft = await post("/api/v1/platform/statutory-tables", { name: "pph21" }, operatorCookie);
-    assert.equal(draft.statusCode, 501, draft.body);
-    assert.equal(readError(draft.body), "not_implemented");
+    assert.equal(draft.statusCode, 400, draft.body);
+    assert.equal(readError(draft.body), "invalid");
     const drafts = await get("/api/v1/platform/statutory-tables", operatorCookie);
     assert.equal(drafts.statusCode, 200, drafts.body);
     assert.deepEqual(readData<unknown[]>(drafts.body), []);
@@ -743,6 +743,7 @@ async function resetRows(): Promise<void> {
   try {
     await admin.query(`
       TRUNCATE TABLE
+        pay_statutory_tables,
         sys_platform_audit_events,
         sys_support_grants,
         sys_tenant_quotas,

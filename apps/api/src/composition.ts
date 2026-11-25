@@ -19,6 +19,7 @@ import {
   readPlatformDatabaseUrl,
   registerPlatform,
 } from "@gotonghr/platform";
+import { verifyStatutoryPayload } from "./statutory-verifier.ts";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { readConfig, type AppConfig } from "./config.ts";
@@ -78,6 +79,7 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
       hashOwnerPassword: hashPassword,
       readPlatformActor: readers.readPlatformActor,
       readTenantAdmin: readers.readTenantAdmin,
+      verifyStatutoryPayload,
     });
     const runningApp = app;
 

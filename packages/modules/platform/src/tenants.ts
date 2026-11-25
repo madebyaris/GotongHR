@@ -458,6 +458,12 @@ export function platformErrorFromDatabase(error: unknown): PlatformError | null 
   if (!error || typeof error !== "object") return null;
   const code = "code" in error && typeof error.code === "string" ? error.code : "";
   const message = error instanceof Error ? error.message : "";
+  if (code === "23P01" || message.includes("published statutory ranges overlap")) {
+    return new PlatformError(409, "conflict", "Published statutory dates overlap.");
+  }
+  if (message.includes("published statutory table is immutable")) {
+    return new PlatformError(409, "conflict", "A published statutory table cannot be changed.");
+  }
   if (code === "23505") return new PlatformError(409, "conflict", "That value is already in use.");
   if (code === "23503") return new PlatformError(400, "invalid_reference", "The reference was not found.");
   if (code === "P0002" || message.includes("tenant not found")) {

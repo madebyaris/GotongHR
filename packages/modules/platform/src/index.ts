@@ -19,8 +19,19 @@ export type {
   TenantAdmin,
   TenantAdminResult,
 } from "./routes.ts";
-export { featureFlagKeys } from "./schema.ts";
-export type { FeatureFlags } from "./schema.ts";
+export { featureFlagKeys, statutoryRuleTypes, statutoryStatuses } from "./schema.ts";
+export type { FeatureFlags, StatutoryRuleType, StatutoryStatus } from "./schema.ts";
+export {
+  createStatutoryDraft,
+  getEffectiveStatutoryTable,
+  listStatutoryTables,
+  publishStatutoryTable,
+} from "./statutory.ts";
+export type {
+  StatutoryPublishVerdict,
+  StatutoryPublishVerifier,
+  StatutoryTableRecord,
+} from "./statutory.ts";
 export {
   listAuditEvents,
   listTenants,

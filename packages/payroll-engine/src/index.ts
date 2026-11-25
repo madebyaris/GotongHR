@@ -53,6 +53,8 @@ export {
   isStatutoryDeclared,
 } from "./tables/select.ts";
 export type { CalculationTableOptions } from "./tables/select.ts";
+export { verifyStatutoryPublish } from "./tables/publish-check.ts";
+export type { StatutoryPublishVerdict } from "./tables/publish-check.ts";
 export { terCategories } from "./tables/types.ts";
 export type { StatutoryTable, TerCategory } from "./tables/types.ts";
 

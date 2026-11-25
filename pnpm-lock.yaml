@@ -38,6 +38,9 @@ importers:
       '@gotonghr/identity':
         specifier: workspace:*
         version: link:../../packages/modules/identity
+      '@gotonghr/payroll-engine':
+        specifier: workspace:*
+        version: link:../../packages/payroll-engine
       '@gotonghr/platform':
         specifier: workspace:*
         version: link:../../packages/modules/platform
