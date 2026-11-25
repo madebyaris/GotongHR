@@ -23,6 +23,16 @@ module.exports = {
       },
     },
     {
+      name: "payslip-pdf-stays-pure",
+      severity: "error",
+      comment:
+        "packages/payslip-pdf cannot import a database, HTTP, storage, Chromium, or another module.",
+      from: { path: "^packages/payslip-pdf/" },
+      to: {
+        path: "(^|/)node_modules/(drizzle-orm|pg|postgres|fastify|@fastify|@aws-sdk|@gotonghr/db|@gotonghr/storage|puppeteer|puppeteer-core|playwright|playwright-core|@sparticuz/chromium|chrome-aws-lambda|undici|axios|node-fetch)(/|$)|^packages/(modules|db|storage)/|^(node:)?(http|https)$",
+      },
+    },
+    {
       name: "web-does-not-import-server",
       severity: "error",
       comment: "apps/web cannot import packages/modules or packages/db.",

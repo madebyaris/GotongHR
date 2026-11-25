@@ -27,6 +27,16 @@ export interface JsonBracket {
   readonly rate_per_scale: number;
 }
 
+/** Same synthetic table, with the JP annual cap replaced or marked missing. */
+export function withJpAnnualCap(rupiahAmount: string | "missing"): StatutoryTable {
+  const copy = cloneSynthetic();
+  copy.jp_annual_wage_cap =
+    rupiahAmount === "missing"
+      ? { source: "missing" }
+      : { source: "synthetic", rupiah: rupiahAmount };
+  return parseStatutoryTable(copy);
+}
+
 /** Same synthetic PTKP and Pasal 17 bands, with replacement TER brackets on A, B, and C. */
 export function withTerBrackets(brackets: readonly JsonBracket[]): StatutoryTable {
   const copy = cloneSynthetic();

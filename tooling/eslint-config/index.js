@@ -4,6 +4,51 @@ import tseslint from "typescript-eslint";
 const boundaryMessage =
   "Import another module only through a port in @gotonghr/contracts.";
 
+const sharedPureGroups = [
+  "drizzle-orm/*",
+  "pg/*",
+  "postgres/*",
+  "fastify/*",
+  "@fastify/*",
+  "@aws-sdk/*",
+  "@gotonghr/db",
+  "@gotonghr/db/*",
+  "@gotonghr/storage",
+  "@gotonghr/storage/*",
+  "**/packages/modules/**",
+  "**/packages/db/**",
+  "**/packages/storage/**",
+];
+
+function purePackagePaths(packageName) {
+  const database = `${packageName} does no database work.`;
+  const network = `${packageName} does no network work.`;
+  const storage = `${packageName} does no storage work.`;
+  return [
+    { name: "drizzle-orm", message: database },
+    { name: "pg", message: database },
+    { name: "postgres", message: database },
+    { name: "fastify", message: network },
+    { name: "@gotonghr/db", message: database },
+    { name: "@gotonghr/storage", message: storage },
+  ];
+}
+
+function purePackageImportRule(packageName, extra) {
+  return [
+    "error",
+    {
+      paths: [...purePackagePaths(packageName), ...(extra.paths ?? [])],
+      patterns: [
+        {
+          group: [...sharedPureGroups, ...(extra.groups ?? [])],
+          message: extra.message,
+        },
+      ],
+    },
+  ];
+}
+
 const nodeGlobals = {
   console: "readonly",
   process: "readonly",
@@ -87,58 +132,57 @@ export default tseslint.config(
   {
     files: ["packages/payroll-engine/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "drizzle-orm",
-              message: "packages/payroll-engine does no database work.",
-            },
-            {
-              name: "pg",
-              message: "packages/payroll-engine does no database work.",
-            },
-            {
-              name: "postgres",
-              message: "packages/payroll-engine does no database work.",
-            },
-            {
-              name: "fastify",
-              message: "packages/payroll-engine does no network work.",
-            },
-            {
-              name: "@gotonghr/db",
-              message: "packages/payroll-engine does no database work.",
-            },
-            {
-              name: "@gotonghr/storage",
-              message: "packages/payroll-engine does no storage work.",
-            },
-          ],
-          patterns: [
-            {
-              group: [
-                "drizzle-orm/*",
-                "pg/*",
-                "postgres/*",
-                "fastify/*",
-                "@fastify/*",
-                "@aws-sdk/*",
-                "@gotonghr/db",
-                "@gotonghr/db/*",
-                "@gotonghr/storage",
-                "@gotonghr/storage/*",
-                "**/packages/modules/**",
-                "**/packages/db/**",
-                "**/packages/storage/**",
-              ],
-              message:
-                "packages/payroll-engine does no database, network, storage, or module work.",
-            },
-          ],
-        },
-      ],
+      "no-restricted-imports": purePackageImportRule("packages/payroll-engine", {
+        message:
+          "packages/payroll-engine does no database, network, storage, or module work.",
+      }),
+    },
+  },
+  {
+    files: ["packages/payslip-pdf/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": purePackageImportRule("packages/payslip-pdf", {
+        message:
+          "packages/payslip-pdf does no database, network, storage, Chromium, or module work.",
+        paths: [
+          {
+            name: "puppeteer",
+            message: "packages/payslip-pdf does not use Chromium.",
+          },
+          {
+            name: "playwright",
+            message: "packages/payslip-pdf does not use Chromium.",
+          },
+          {
+            name: "http",
+            message: "packages/payslip-pdf does no network work.",
+          },
+          {
+            name: "https",
+            message: "packages/payslip-pdf does no network work.",
+          },
+          {
+            name: "node:http",
+            message: "packages/payslip-pdf does no network work.",
+          },
+          {
+            name: "node:https",
+            message: "packages/payslip-pdf does no network work.",
+          },
+        ],
+        groups: [
+          "puppeteer",
+          "puppeteer-core",
+          "playwright",
+          "playwright-core",
+          "@sparticuz/chromium",
+          "http",
+          "node:http",
+          "https",
+          "node:https",
+          "undici",
+        ],
+      }),
     },
   },
 );

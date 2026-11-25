@@ -78,7 +78,7 @@ The numbers below are the design budget from the architecture spec. This slice e
 | Headroom / page cache | ~334 MB | ~931 MB | Room left in the design budget. |
 | Total active footprint | ~690 MB / 1,024 MB | ~1,117 MB / 2,048 MB | Sum of the design budget. |
 
-Payslip PDF rendering is not part of this slice.
+Payslip PDFs are rendered by `packages/payslip-pdf` without Chromium. That package's test checks one PDF stays under 20 MB RSS above a warmed baseline. This table is the container budget, not that measurement.
 
 ## Object storage
 

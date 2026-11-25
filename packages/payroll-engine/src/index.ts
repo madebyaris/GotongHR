@@ -26,6 +26,24 @@ export type {
   ReconcilePph21Result,
 } from "./pph21/reconcile.ts";
 export { terRate, terTax } from "./pph21/ter.ts";
+export { calculateBpjs } from "./bpjs/calculate.ts";
+export type { CalculateBpjsInput, CalculateBpjsResult } from "./bpjs/calculate.ts";
+export { calculateJkk, jkkRiskClasses } from "./bpjs/jkk.ts";
+export type { JkkResult, JkkRiskClass } from "./bpjs/jkk.ts";
+export { JKP_WAGE_CAP, jkpRecomposition, jkpRecompositionParts } from "./bpjs/jkp.ts";
+export type { JkpRecomposition } from "./bpjs/jkp.ts";
+export { calculateKesehatan, KESEHATAN_WAGE_CAP } from "./bpjs/kesehatan.ts";
+export type { KesehatanResult } from "./bpjs/kesehatan.ts";
+export { calculateJp, calculateJht, calculateJkm } from "./bpjs/ketenagakerjaan.ts";
+export type { ContributionResult, JpResult } from "./bpjs/ketenagakerjaan.ts";
+export { calculateOvertime, overtimeHourlyWage } from "./overtime/calculate.ts";
+export type { OvertimeInput, OvertimeResult } from "./overtime/calculate.ts";
+export { isOvertimeDayKind, overtimeDayKinds } from "./overtime/schedules.ts";
+export type { OvertimeDayKind } from "./overtime/schedules.ts";
+export { calculatePkwtCompensation } from "./pkwt/compensation.ts";
+export type { PkwtCompensationInput } from "./pkwt/compensation.ts";
+export { calculateThr } from "./thr/calculate.ts";
+export type { ThrInput } from "./thr/calculate.ts";
 export { jpAnnualWageCap } from "./tables/caps.ts";
 export { parseStatutoryTable } from "./tables/parse.ts";
 export {
