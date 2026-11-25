@@ -1,13 +1,22 @@
+import { startOutboxDispatcher } from "@gotonghr/audit";
+import { requiredEnv } from "@gotonghr/db";
 import { composeFromEnv } from "../composition.ts";
 import { runShutdown } from "../shutdown.ts";
 
 async function main(): Promise<void> {
   const composed = await composeFromEnv(process.env);
+  const dispatcher = startOutboxDispatcher({
+    boss: composed.boss,
+    connectionString: requiredEnv(process.env, "DATABASE_URL_QUEUE"),
+  });
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    runShutdown(() => composed.close());
+    runShutdown(async () => {
+      await dispatcher.stop();
+      await composed.close();
+    });
   };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);

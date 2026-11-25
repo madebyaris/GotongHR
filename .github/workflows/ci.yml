@@ -52,6 +52,8 @@ jobs:
       GOTONG_BOOTSTRAP_PASSWORD: owner-password-1
       GOTONG_BOOTSTRAP_TENANT_NAME: GotongHR
       GOTONG_BOOTSTRAP_OWNER_NAME: Owner
+      GOTONG_PII_KEK: 7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a
+      AUDIT_HASH_CHAIN: "on"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

@@ -98,15 +98,22 @@ export default tseslint.config(
               name: "@gotonghr/db",
               message: "apps/web does not import the database package.",
             },
+            {
+              name: "@gotonghr/crypto",
+              message: "apps/web cannot import @gotonghr/crypto.",
+            },
           ],
           patterns: [
             {
               group: [
                 "@gotonghr/db/*",
+                "@gotonghr/crypto",
+                "@gotonghr/crypto/*",
                 "**/packages/db/**",
+                "**/packages/crypto/**",
                 "**/packages/modules/**",
               ],
-              message: "apps/web does not import packages/db or packages/modules.",
+              message: "apps/web does not import packages/db, packages/crypto, or packages/modules.",
             },
           ],
         },
@@ -141,6 +148,13 @@ export default tseslint.config(
       "no-restricted-imports": purePackageImportRule("packages/payroll-engine", {
         message:
           "packages/payroll-engine does no database, network, storage, or module work.",
+        paths: [
+          {
+            name: "@gotonghr/crypto",
+            message: "packages/payroll-engine does no PII crypto.",
+          },
+        ],
+        groups: ["@gotonghr/crypto", "@gotonghr/crypto/*", "**/packages/crypto/**"],
       }),
     },
   },
@@ -175,6 +189,10 @@ export default tseslint.config(
             name: "node:https",
             message: "packages/payslip-pdf does no network work.",
           },
+          {
+            name: "@gotonghr/crypto",
+            message: "packages/payslip-pdf cannot import @gotonghr/crypto.",
+          },
         ],
         groups: [
           "puppeteer",
@@ -187,6 +205,9 @@ export default tseslint.config(
           "https",
           "node:https",
           "undici",
+          "@gotonghr/crypto",
+          "@gotonghr/crypto/*",
+          "**/packages/crypto/**",
         ],
       }),
     },

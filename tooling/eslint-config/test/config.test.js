@@ -30,6 +30,7 @@ function restriction(fragment) {
 test("web, modules, and payroll-engine keep their import boundaries", () => {
   const web = JSON.stringify(entry("apps/web").rules["no-restricted-imports"]);
   assert.match(web, /apps\/web does not import the database package/);
+  assert.match(web, /apps\/web cannot import @gotonghr\/crypto/);
 
   const modules = JSON.stringify(entry("packages/modules").rules["no-restricted-imports"]);
   assert.match(modules, /packages\/modules/);
@@ -39,7 +40,7 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
   const payroll = restriction("packages/payroll-engine");
   assert.deepEqual(
     payroll.paths.map((item) => item.name),
-    ["drizzle-orm", "pg", "postgres", "fastify", "@gotonghr/db", "@gotonghr/storage"],
+    ["drizzle-orm", "pg", "postgres", "fastify", "@gotonghr/db", "@gotonghr/storage", "@gotonghr/crypto"],
   );
   assert.ok(payroll.paths.every((item) => item.message.includes("packages/payroll-engine does no")));
   assert.deepEqual(payroll.patterns[0].group, [
@@ -56,6 +57,9 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
     "**/packages/modules/**",
     "**/packages/db/**",
     "**/packages/storage/**",
+    "@gotonghr/crypto",
+    "@gotonghr/crypto/*",
+    "**/packages/crypto/**",
   ]);
   assert.match(payroll.patterns[0].message, /packages\/payroll-engine does no database, network, storage, or module work/);
 
@@ -75,6 +79,7 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
       "https",
       "node:http",
       "node:https",
+      "@gotonghr/crypto",
     ],
   );
   assert.equal(
@@ -113,6 +118,9 @@ test("web, modules, and payroll-engine keep their import boundaries", () => {
     "https",
     "node:https",
     "undici",
+    "@gotonghr/crypto",
+    "@gotonghr/crypto/*",
+    "**/packages/crypto/**",
   ]);
   assert.match(
     payslip.patterns[0].message,
