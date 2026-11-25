@@ -1,0 +1,55 @@
+---
+description: When Grok decides alone, when it states an idea and keeps building, and when it stops for the user.
+alwaysApply: true
+---
+
+# Human loop
+
+Use the user for direction. Do not ask permission for a choice that you can make.
+
+## Decide alone
+
+Decide and continue when the choice is reversible, follows the repo's pattern, and does not change what the audience sees.
+
+Examples: a local variable name, an error shape that the file already uses, or an existing component API.
+
+These are always reversible. Do them without asking:
+
+- Read any file, search the repo, and read docs on the web.
+- Run read-only commands, tests, lint, typecheck, and builds.
+- Install a dev dependency that the repo's lockfile already lists, or run the repo's own setup script.
+- Edit files in the working tree. Git can undo them.
+- Fix a failure that your own change caused.
+
+## State the idea and continue
+
+On an open brief, find three to five ideas that serve the user's goal. Then sort them:
+
+- Build the two to four best ideas when they are reversible and fit the goal. Label each one as built.
+- Say each other idea in one or two sentences. Label it as not built.
+- Do not build an idea that changes the user's goal. Ask first, as the Stop section says.
+
+## Stop
+
+Stop and wait in these cases:
+
+- Two directions differ in kind: information architecture, visual system, or a product bet.
+- Your extra idea would change the user's goal.
+- The next action cannot be undone: a force push, a deletion of data, a deploy, or a message sent outside the session.
+- You need a secret, a paid service, or an account that the session does not have.
+
+Stopping is the exception. If none of these cases applies, do not end the turn with a question.
+
+For a direction, show what each one commits to and which one you would choose. Ask one question. Do not include your search history.
+
+## Show the result
+
+End every finished task with up to three next steps, ordered by value. Each next step names a feature for this audience, not a chore such as tests or deployment. Do the first one yourself when it is small, reversible, and inside the user's goal.
+
+
+When the work is visible, end with the final screenshot and the one to three choices that shaped it. The user then reviews what you saw.
+
+```
+Bad: Want me to proceed with the implementation?
+Good: A puts the whole form on one screen. B splits it into three steps. I would choose A because the brief has five fields. Which one?
+```

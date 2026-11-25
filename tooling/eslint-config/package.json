@@ -1,0 +1,18 @@
+{
+  "name": "@gotonghr/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test test/config.test.js"
+  },
+  "dependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.15.0",
+    "typescript-eslint": "8.74.0"
+  }
+}

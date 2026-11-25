@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { after, before, describe, it } from "node:test";
+import Fastify from "fastify";
+import { createLocalStorage } from "./local.ts";
+import { MAX_UPLOAD_BYTES } from "./types.ts";
+
+describe("local object storage", () => {
+  let root: string;
+
+  before(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "gotong-objects-"));
+  });
+
+  after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("streams a put under 2 MB and rejects a larger body", async () => {
+    const storage = createLocalStorage({
+      rootDir: root,
+      secret: "test-secret",
+      urlPrefix: "",
+    });
+    const app = Fastify({ logger: false });
+    await storage.registerRoutes(app);
+
+    const small = await storage.presignPut({
+      key: "tenant/a.txt",
+      contentType: "text/plain",
+      maxBytes: MAX_UPLOAD_BYTES,
+    });
+    const put = await app.inject({
+      method: "PUT",
+      url: small.url,
+      headers: { "content-type": "application/octet-stream" },
+      payload: Buffer.from("hello"),
+    });
+    assert.equal(put.statusCode, 200);
+    assert.equal(await readFile(path.join(root, "tenant/a.txt"), "utf8"), "hello");
+
+    const got = await storage.presignGet({ key: "tenant/a.txt" });
+    const read = await app.inject({ method: "GET", url: got.url });
+    assert.equal(read.statusCode, 200);
+    assert.equal(read.body, "hello");
+
+    const huge = await storage.presignPut({
+      key: "tenant/big.bin",
+      contentType: "application/octet-stream",
+      maxBytes: MAX_UPLOAD_BYTES,
+    });
+    const rejected = await app.inject({
+      method: "PUT",
+      url: huge.url,
+      headers: { "content-type": "application/octet-stream", "content-length": String(MAX_UPLOAD_BYTES + 1) },
+      payload: Buffer.alloc(MAX_UPLOAD_BYTES + 1),
+    });
+    assert.equal(rejected.statusCode, 413);
+    await assert.rejects(stat(path.join(root, "tenant/big.bin")));
+
+    await storage.delete({ key: "tenant/a.txt" });
+    await assert.rejects(stat(path.join(root, "tenant/a.txt")));
+    await app.close();
+  });
+
+  it("rejects a key that escapes the root", async () => {
+    const storage = createLocalStorage({ rootDir: root, secret: "test-secret", urlPrefix: "" });
+    await assert.rejects(storage.presignPut({
+      key: "../secret",
+      contentType: "text/plain",
+      maxBytes: 10,
+    }));
+  });
+});

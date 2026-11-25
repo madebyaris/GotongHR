@@ -1,0 +1,13 @@
+{
+  "name": "@gotonghr/arch-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test test/rules.test.js"
+  },
+  "devDependencies": {
+    "eslint": "10.15.0"
+  }
+}

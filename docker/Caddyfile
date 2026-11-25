@@ -1,0 +1,20 @@
+{
+	admin off
+}
+
+:80 {
+	handle_path /api/* {
+		encode zstd gzip
+		reverse_proxy api:3000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server {
+			precompressed br gzip
+		}
+		@immutable path /assets/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+	}
+}

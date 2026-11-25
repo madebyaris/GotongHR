@@ -1,0 +1,81 @@
+# postgres:18-alpine@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
+name: gotonghr
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    entrypoint: ["/bin/sh", "/usr/local/bin/gotong-postgres-entrypoint.sh"]
+    command: ["postgres"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: gotonghr
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./postgres.vps.conf:/etc/postgresql/postgres.vps.conf:ro
+      - ./postgres-entrypoint.sh:/usr/local/bin/gotong-postgres-entrypoint.sh:ro
+    shm_size: 256mb
+    mem_limit: 768m
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gotonghr"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    environment:
+      DATABASE_URL_SUPERUSER: postgres://postgres:${POSTGRES_PASSWORD:-change-me}@postgres:5432/gotonghr
+      DATABASE_URL_MIGRATOR: postgres://gotong_migrator:${MIGRATOR_PASSWORD:-change-me-migrator}@postgres:5432/gotonghr
+      DATABASE_URL_APP: postgres://app_tenant:${APP_PASSWORD:-change-me-app}@postgres:5432/gotonghr
+      DATABASE_URL_PLATFORM: postgres://platform_admin:${PLATFORM_PASSWORD:-change-me-platform}@postgres:5432/gotonghr
+      MIGRATOR_PASSWORD: ${MIGRATOR_PASSWORD:-change-me-migrator}
+      APP_PASSWORD: ${APP_PASSWORD:-change-me-app}
+      PLATFORM_PASSWORD: ${PLATFORM_PASSWORD:-change-me-platform}
+      GOTONG_ROLE: monolith
+      GOTONG_DEPLOYMENT_MODE: ${GOTONG_DEPLOYMENT_MODE:-single_tenant}
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      QUEUE_DRIVER: ${QUEUE_DRIVER:-pgboss}
+      STORAGE_LOCAL_SECRET: ${STORAGE_LOCAL_SECRET:-change-me}
+      NODE_OPTIONS: --max-old-space-size=512
+      PORT: "3000"
+      HOST: 0.0.0.0
+    volumes:
+      - api_data:/app/.data
+    mem_limit: 640m
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/readyz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    mem_limit: 64m
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  api_data:
