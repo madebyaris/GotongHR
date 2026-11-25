@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { access, lstat, mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
@@ -149,6 +149,27 @@ export function createLocalStorage(options: LocalStorageOptions): LocalObjectSto
         secret,
       );
       return { url: objectUrl(prefix, token), method: "GET" };
+    },
+    async openRead(input) {
+      assertObjectKey(input.key);
+      const file = resolveObjectPath(rootDir, input.key);
+      try {
+        await access(file);
+      } catch {
+        throw new Error("Object was not found.");
+      }
+      return createReadStream(file);
+    },
+    async stat(input) {
+      assertObjectKey(input.key);
+      try {
+        const info = await stat(resolveObjectPath(rootDir, input.key));
+        if (!info.isFile()) return null;
+        return { byteSize: info.size };
+      } catch (error) {
+        if (isMissing(error)) return null;
+        throw error;
+      }
     },
     async delete(input) {
       await rm(resolveObjectPath(rootDir, input.key), { force: true });

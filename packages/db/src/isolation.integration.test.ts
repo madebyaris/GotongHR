@@ -42,8 +42,10 @@ const requiredTenantTables = [
   "aud_outbox_events",
   "aud_pii_access_logs",
   "aud_tenant_keys",
+  "hr_documents",
   "hr_employee_pii",
   "hr_employees",
+  "hr_import_jobs",
   "hr_secret",
   "id_branches",
   "id_legal_entities",
@@ -71,8 +73,10 @@ const platformDeniedTables = [
   "att_overtime_requests",
   "att_rosters",
   "att_shifts",
+  "hr_documents",
   "hr_employee_pii",
   "hr_employees",
+  "hr_import_jobs",
   "hr_secret",
   "att_secret",
   "pay_run",
@@ -257,6 +261,8 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       "att_approval_delegations",
       "att_leave_types",
       "att_shifts",
+      "hr_documents",
+      "hr_import_jobs",
       "ai_knowledge_chunks",
       "hr_employee_pii",
       "hr_employees",
@@ -332,6 +338,8 @@ describe("tenant isolation", { concurrency: 1 }, () => {
     for (const table of platformDeniedTables) {
       await assertDeniedOrEmpty(platform, `SELECT id FROM ${ident(table)}`);
     }
+    await assertPermissionDenied(platform, "SELECT id FROM hr_documents");
+    await assertPermissionDenied(platform, "SELECT id FROM hr_import_jobs");
   });
 
   it("rejects UPDATE, DELETE, and TRUNCATE on append-only audit tables", async () => {
@@ -666,6 +674,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const employeeB = randomUUID();
   const employeePiiA = randomUUID();
   const employeePiiB = randomUUID();
+  const documentA = randomUUID();
+  const documentB = randomUUID();
+  const importA = randomUUID();
+  const importB = randomUUID();
   const conversationA = randomUUID();
   const conversationB = randomUUID();
   const messageA = randomUUID();
@@ -839,6 +851,46 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ],
     );
     await superuser.query(
+      `INSERT INTO hr_documents (
+         id, tenant_id, employee_id, doc_type, file_name, storage_key, content_type, byte_size, uploaded_by
+       ) VALUES
+         ($1, $3, $5, 'ktp', 'ktp-a.pdf', $7, 'application/pdf', 1200, $9),
+         ($2, $4, $6, 'ktp', 'ktp-b.pdf', $8, 'application/pdf', 1200, $10)`,
+      [
+        documentA,
+        documentB,
+        tenantA,
+        tenantB,
+        employeeA,
+        employeeB,
+        `t/${tenantA}/emp/${employeeA}/doc/${documentA}/ktp-a.pdf`,
+        `t/${tenantB}/emp/${employeeB}/doc/${documentB}/ktp-b.pdf`,
+        userA,
+        userB,
+      ],
+    );
+    await superuser.query(
+      `INSERT INTO hr_import_jobs (
+         id, tenant_id, status, mode, storage_key, legal_entity_id, branch_id, requested_by
+       ) VALUES
+         ($1, $3, 'queued', 'dry_run', $5, $7, $9, $11),
+         ($2, $4, 'queued', 'dry_run', $6, $8, $10, $12)`,
+      [
+        importA,
+        importB,
+        tenantA,
+        tenantB,
+        `t/${tenantA}/import/${importA}.csv`,
+        `t/${tenantB}/import/${importB}.csv`,
+        entityA,
+        entityB,
+        branchA,
+        branchB,
+        userA,
+        userB,
+      ],
+    );
+    await superuser.query(
       `INSERT INTO hr_secret (id, tenant_id, marker) VALUES ($1, $3, 'a'), ($2, $4, 'b')`,
       [hrA, hrB, tenantA, tenantB],
     );
@@ -996,8 +1048,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["aud_outbox_events", { a: outboxA, b: outboxB }],
       ["aud_pii_access_logs", { a: piiA, b: piiB }],
       ["aud_tenant_keys", { a: keyA, b: keyB }],
+      ["hr_documents", { a: documentA, b: documentB }],
       ["hr_employee_pii", { a: employeePiiA, b: employeePiiB }],
       ["hr_employees", { a: employeeA, b: employeeB }],
+      ["hr_import_jobs", { a: importA, b: importB }],
       ["hr_secret", { a: hrA, b: hrB }],
       ["id_branches", { a: branchA, b: branchB }],
       ["id_legal_entities", { a: entityA, b: entityB }],
@@ -1035,6 +1089,8 @@ async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   await superuser.query("DELETE FROM sys_support_grants WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM rls_probe WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM att_clock_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM hr_documents WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM hr_import_jobs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_employee_pii WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM hr_employees WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   for (const table of standIns) {
