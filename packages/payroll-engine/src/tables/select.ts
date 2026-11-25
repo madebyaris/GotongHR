@@ -48,6 +48,20 @@ export function findTableForDate(
 }
 
 /**
+ * Copies the table status onto a calculation result.
+ * tableUndeclared is false only for a published non-fixture table with every amount present.
+ */
+export function calculationProvenance(table: StatutoryTable): {
+  readonly tableStatus: StatutoryTable["status"];
+  readonly tableUndeclared: boolean;
+} {
+  return {
+    tableStatus: table.status,
+    tableUndeclared: !isStatutoryDeclared(table),
+  };
+}
+
+/**
  * True only for a published non-fixture table whose TER rates, PTKP amounts, and JP cap are present.
  * Draft files and synthetic fixtures stay false so golden checks do not treat them as the law.
  */

@@ -183,6 +183,111 @@ test("reconciliation refuses a draft unless allowUndeclared is set", () => {
   });
   const allowed = reconcilePph21({ ...input, allowUndeclared: true });
   assert.equal(allowed.withholding, 875_000n);
+  assert.equal(allowed.tableStatus, "draft");
+  assert.equal(allowed.tableUndeclared, true);
+});
+
+function labelSources(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(labelSources);
+  if (typeof value !== "object" || value === null) return value;
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    next[key] = key === "source" && child === "synthetic" ? "worked-example" : labelSources(child);
+  }
+  return next;
+}
+
+test("monthly and reconciliation results mark published and draft tables", () => {
+  const monthlyPublished = calculateMonthlyPph21({
+    payrollDate: civilDate(2026, 1, 31),
+    periodMonth: 1,
+    table,
+    ptkpStatus: "TK/0",
+    method: "gross",
+    components: components(5_000_000n),
+  });
+  assert.equal(monthlyPublished.tableStatus, "published");
+  assert.equal(monthlyPublished.tableUndeclared, true);
+  const reconciledPublished = reconcilePph21({
+    payrollDate: civilDate(2026, 12, 31),
+    reason: "december",
+    table,
+    ptkpStatus: "TK/0",
+    activeMonths: 12,
+    ytdGrossTaxable: rupiah(60_000_000n),
+    ytdEmployeeJht: rupiah(0n),
+    ytdEmployeeJp: rupiah(0n),
+    verifiedZakat: rupiah(0n),
+    ytdPph21Withheld: rupiah(0n),
+  });
+  assert.equal(reconciledPublished.tableStatus, "published");
+  assert.equal(reconciledPublished.tableUndeclared, true);
+
+  const draftRaw = structuredClone(readJson("./fixtures/synthetic-pph21.json")) as Record<string, unknown>;
+  draftRaw.status = "draft";
+  const draft = parseStatutoryTable(draftRaw);
+  const monthlyDraft = calculateMonthlyPph21({
+    payrollDate: civilDate(2026, 1, 31),
+    periodMonth: 1,
+    table: draft,
+    ptkpStatus: "TK/0",
+    method: "gross",
+    components: components(5_000_000n),
+    allowUndeclared: true,
+  });
+  assert.equal(monthlyDraft.tableStatus, "draft");
+  assert.equal(monthlyDraft.tableUndeclared, true);
+  assert.equal(monthlyDraft.tax, monthlyPublished.tax);
+  const reconciledDraft = reconcilePph21({
+    payrollDate: civilDate(2026, 12, 31),
+    reason: "december",
+    table: draft,
+    ptkpStatus: "TK/0",
+    activeMonths: 12,
+    ytdGrossTaxable: rupiah(60_000_000n),
+    ytdEmployeeJht: rupiah(0n),
+    ytdEmployeeJp: rupiah(0n),
+    verifiedZakat: rupiah(0n),
+    ytdPph21Withheld: rupiah(0n),
+    allowUndeclared: true,
+  });
+  assert.equal(reconciledDraft.tableStatus, "draft");
+  assert.equal(reconciledDraft.tableUndeclared, true);
+  assert.equal(reconciledDraft.annualTax, reconciledPublished.annualTax);
+
+  const declaredRaw = labelSources(structuredClone(readJson("./fixtures/synthetic-pph21.json"))) as Record<
+    string,
+    unknown
+  >;
+  delete declaredRaw.fixture;
+  delete declaredRaw.not_official;
+  delete declaredRaw.note;
+  declaredRaw.status = "published";
+  const declared = parseStatutoryTable(declaredRaw);
+  const monthlyDeclared = calculateMonthlyPph21({
+    payrollDate: civilDate(2026, 1, 31),
+    periodMonth: 1,
+    table: declared,
+    ptkpStatus: "TK/0",
+    method: "gross",
+    components: components(5_000_000n),
+  });
+  assert.equal(monthlyDeclared.tableStatus, "published");
+  assert.equal(monthlyDeclared.tableUndeclared, false);
+  const reconciledDeclared = reconcilePph21({
+    payrollDate: civilDate(2026, 12, 31),
+    reason: "december",
+    table: declared,
+    ptkpStatus: "TK/0",
+    activeMonths: 12,
+    ytdGrossTaxable: rupiah(60_000_000n),
+    ytdEmployeeJht: rupiah(0n),
+    ytdEmployeeJp: rupiah(0n),
+    verifiedZakat: rupiah(0n),
+    ytdPph21Withheld: rupiah(0n),
+  });
+  assert.equal(reconciledDeclared.tableStatus, "published");
+  assert.equal(reconciledDeclared.tableUndeclared, false);
 });
 
 test("reconciliation does not need TER rates and does not cap JP with a guessed number", () => {

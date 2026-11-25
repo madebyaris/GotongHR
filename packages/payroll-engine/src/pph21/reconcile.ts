@@ -2,8 +2,8 @@ import type { Idr, PtkpStatus } from "@gotonghr/contracts";
 import { civilDate, type CivilDate } from "../civil-date.ts";
 import { PayrollInputError } from "../errors.ts";
 import { nonNegativeRupiah, rupiah } from "../money.ts";
-import { assertReadyForCalculation, assertTableCovers } from "../tables/select.ts";
-import type { StatutoryTable, TerCategory } from "../tables/types.ts";
+import { assertReadyForCalculation, assertTableCovers, calculationProvenance } from "../tables/select.ts";
+import type { StatutoryTable, TableStatus, TerCategory } from "../tables/types.ts";
 import { biayaJabatan } from "./biaya-jabatan.ts";
 import { pasal17Tax, roundPkpDown } from "./pasal17.ts";
 import { annualPtkp, terCategoryForPtkp } from "./ptkp.ts";
@@ -35,6 +35,8 @@ export interface ReconcilePph21Result {
   readonly ytdPph21Withheld: Idr;
   readonly withholding: Idr;
   readonly refund: Idr;
+  readonly tableStatus: TableStatus;
+  readonly tableUndeclared: boolean;
 }
 
 function floorAtZero(value: bigint): bigint {
@@ -45,6 +47,7 @@ function floorAtZero(value: bigint): bigint {
  * December and mid-year exit use Pasal 17 on the year, not monthly TER.
  * PKP is rounded down to Rp1,000. A negative delta is an overpayment refund.
  * The payroll date is injected. This function does not read the clock.
+ * tableStatus and tableUndeclared travel with the result so a payslip can block a draft.
  */
 export function reconcilePph21(input: ReconcilePph21Input): ReconcilePph21Result {
   const payrollDate = civilDate(input.payrollDate.year, input.payrollDate.month, input.payrollDate.day);
@@ -88,5 +91,6 @@ export function reconcilePph21(input: ReconcilePph21Input): ReconcilePph21Result
     ytdPph21Withheld: withheld,
     withholding,
     refund,
+    ...calculationProvenance(input.table),
   };
 }

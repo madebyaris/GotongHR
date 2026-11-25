@@ -2,8 +2,8 @@ import type { Idr, PtkpStatus, TaxMethod } from "@gotonghr/contracts";
 import { civilDate, type CivilDate } from "../civil-date.ts";
 import { PayrollInputError } from "../errors.ts";
 import { rupiah } from "../money.ts";
-import { assertReadyForCalculation, assertTableCovers } from "../tables/select.ts";
-import type { StatutoryTable, TerCategory } from "../tables/types.ts";
+import { assertReadyForCalculation, assertTableCovers, calculationProvenance } from "../tables/select.ts";
+import type { StatutoryTable, TableStatus, TerCategory } from "../tables/types.ts";
 import { grossTaxableOf, type GrossTaxableComponents } from "./gross-taxable.ts";
 import { solveGrossUp } from "./gross-up.ts";
 import { terCategoryForPtkp } from "./ptkp.ts";
@@ -31,6 +31,8 @@ export interface MonthlyPph21Result {
   readonly employerBorneTax: Idr;
   readonly grossedCost: Idr;
   readonly iterations: number;
+  readonly tableStatus: TableStatus;
+  readonly tableUndeclared: boolean;
 }
 
 function zero(): Idr {
@@ -44,6 +46,7 @@ function zero(): Idr {
  * nett: the agreed components are the employee's net, and the employer bears the tax.
  * Nett grossed cost is that net plus the tax, including a Rp1 solver gap.
  * December and exit months use reconcilePph21. This function does not read the clock.
+ * tableStatus and tableUndeclared travel with the result so a payslip can block a draft.
  */
 export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Result {
   const payrollDate = civilDate(input.payrollDate.year, input.payrollDate.month, input.payrollDate.day);
@@ -64,6 +67,7 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
     input.allowUndeclared === true ? { allowUndeclared: true } : undefined,
   );
   const category = terCategoryForPtkp(input.ptkpStatus);
+  const provenance = calculationProvenance(input.table);
   const grossTaxable = grossTaxableOf(input.components);
   if (input.method === "gross") {
     const tax = terTax(input.table, category, grossTaxable);
@@ -79,6 +83,7 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
       employerBorneTax: zero(),
       grossedCost: grossTaxable,
       iterations: 1,
+      ...provenance,
     };
   }
   const solved = solveGrossUp(grossTaxable, input.table.ter.taxRounding, (base) =>
@@ -100,6 +105,7 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
       employerBorneTax: zero(),
       grossedCost: grossedTaxable,
       iterations: solved.iterations,
+      ...provenance,
     };
   }
   return {
@@ -114,5 +120,6 @@ export function calculateMonthlyPph21(input: MonthlyPph21Input): MonthlyPph21Res
     employerBorneTax: tax,
     grossedCost: rupiah(grossTaxable + solved.tax),
     iterations: solved.iterations,
+    ...provenance,
   };
 }
