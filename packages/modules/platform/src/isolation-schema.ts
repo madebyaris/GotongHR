@@ -17,7 +17,10 @@ export async function applyTenantSchema(env: NodeJS.ProcessEnv = process.env): P
     migratorUrl: migrateEnv.migratorUrl,
   });
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
-  await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateAi({
+    migratorUrl: migrateEnv.migratorUrl,
+    superuserUrl: migrateEnv.superuserUrl,
+  });
 }
 
 if (process.env.GOTONG_APPLY_TENANT_SCHEMA === "1") {

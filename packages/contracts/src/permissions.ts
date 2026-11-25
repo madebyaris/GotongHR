@@ -7,6 +7,8 @@ export const permissionAtoms = [
   "payroll.run.finalize",
   "payroll.coretax.export",
   "ai.action.approve",
+  "ai.knowledge.read",
+  "ai.knowledge.write",
   "audit.log.read",
   "tenant.support_grant.write",
 ] as const;

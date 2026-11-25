@@ -171,6 +171,8 @@ test("permission atoms are the spec set", () => {
     "payroll.run.finalize",
     "payroll.coretax.export",
     "ai.action.approve",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
     "audit.log.read",
     "tenant.support_grant.write",
   ]);
@@ -199,7 +201,11 @@ test("built-in roles keep finalize and PII off the employee", () => {
   assert.equal(roleHasPermission("hr_admin", "payroll.run.prepare"), true);
   assert.equal(roleHasPermission("hr_admin", "payroll.run.finalize"), false);
   assert.equal(roleHasPermission("payroll_admin", "payroll.run.finalize"), false);
-  assert.deepEqual(rolePermissions.finance_viewer, ["audit.log.read"]);
+  assert.deepEqual(rolePermissions.finance_viewer, ["audit.log.read", "ai.knowledge.read"]);
+  assert.equal(roleHasPermission("org_owner", "ai.knowledge.write"), true);
+  assert.equal(roleHasPermission("hr_admin", "ai.knowledge.read"), true);
+  assert.equal(roleHasPermission("employee", "ai.knowledge.read"), false);
+  assert.equal(roleHasPermission("payroll_admin", "ai.knowledge.write"), false);
   assert.equal(roleScopeDefaults.employee.selfOnly, true);
   assert.equal(roleScopeDefaults.line_manager.directReportsOnly, true);
   assert.equal(roleScopeDefaults.org_owner.selfOnly, false);

@@ -78,6 +78,8 @@ export const rolePermissions = {
     "payroll.run.finalize",
     "payroll.coretax.export",
     "ai.action.approve",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
     "audit.log.read",
     "tenant.support_grant.write",
   ],
@@ -88,18 +90,27 @@ export const rolePermissions = {
     "payroll.run.prepare",
     "payroll.run.create",
     "ai.action.approve",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
   ],
   payroll_admin: [
     "employee.pii.read",
     "payroll.run.prepare",
     "payroll.run.create",
     "payroll.coretax.export",
+    "ai.knowledge.read",
   ],
-  finance_viewer: ["audit.log.read"],
+  finance_viewer: ["audit.log.read", "ai.knowledge.read"],
   branch_manager: ["attendance.approve"],
   line_manager: ["attendance.approve"],
   employee: [],
-  it_security_admin: ["audit.log.read", "employee.pii.read", "tenant.support_grant.write"],
+  it_security_admin: [
+    "audit.log.read",
+    "employee.pii.read",
+    "tenant.support_grant.write",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
+  ],
 } as const satisfies Record<RoleCode, readonly PermissionAtom[]>;
 
 export function roleHasPermission(role: RoleCode, atom: PermissionAtom): boolean {

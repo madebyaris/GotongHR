@@ -19,7 +19,10 @@ async function main(): Promise<void> {
     migratorUrl: migrateEnv.migratorUrl,
   });
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
-  await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateAi({
+    migratorUrl: migrateEnv.migratorUrl,
+    superuserUrl: migrateEnv.superuserUrl,
+  });
   await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
 }
 

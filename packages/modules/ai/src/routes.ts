@@ -108,6 +108,62 @@ export async function registerAiRoutes(app: FastifyInstance, deps: AiRouteDeps):
     }
   });
 
+  app.get("/api/v1/ai/knowledge/sops", { preHandler: deps.guard }, async (request, reply) => {
+    const caller = requireCaller(deps, request, reply);
+    if (!caller) return;
+    try {
+      const result = await deps.runtime.listSops(caller);
+      if (!result.ok) return reply.code(result.status).send(fail(result.code, result.message));
+      return reply.send(ok(result.data));
+    } catch {
+      return failed(request, reply);
+    }
+  });
+
+  app.post("/api/v1/ai/knowledge/sops", { preHandler: deps.guard }, async (request, reply) => {
+    const caller = requireCaller(deps, request, reply);
+    if (!caller) return;
+    const body = asRecord(request.body);
+    if (!body || typeof body.title !== "string") {
+      return reply.code(400).send(fail("invalid_body", "Title is required."));
+    }
+    if (body.text !== undefined && typeof body.text !== "string") {
+      return reply.code(400).send(fail("invalid_body", "Send plain text or a PDF."));
+    }
+    if (body.pdfBase64 !== undefined && typeof body.pdfBase64 !== "string") {
+      return reply.code(400).send(fail("invalid_body", "Send plain text or a PDF."));
+    }
+    try {
+      const result = await deps.runtime.ingestSop(
+        caller,
+        {
+          title: body.title,
+          ...(typeof body.text === "string" ? { text: body.text } : {}),
+          ...(typeof body.pdfBase64 === "string" ? { pdfBase64: body.pdfBase64 } : {}),
+        },
+        requestMeta(request),
+      );
+      if (!result.ok) return reply.code(result.status).send(fail(result.code, result.message));
+      return reply.send(ok(result.data));
+    } catch {
+      return failed(request, reply);
+    }
+  });
+
+  app.delete("/api/v1/ai/knowledge/sops/:id", { preHandler: deps.guard }, async (request, reply) => {
+    const caller = requireCaller(deps, request, reply);
+    if (!caller) return;
+    const id = routeId(request);
+    if (!id) return reply.code(404).send(fail("not_found", "SOP not found."));
+    try {
+      const result = await deps.runtime.deleteSop(caller, id, requestMeta(request));
+      if (!result.ok) return reply.code(result.status).send(fail(result.code, result.message));
+      return reply.send(ok(result.data));
+    } catch {
+      return failed(request, reply);
+    }
+  });
+
   app.post("/api/v1/ai/proposals/:id/reject", { preHandler: deps.guard }, async (request, reply) => {
     const caller = requireCaller(deps, request, reply);
     if (!caller) return;

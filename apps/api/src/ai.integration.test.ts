@@ -76,7 +76,10 @@ describe("ai http", { concurrency: 1 }, () => {
       migratorUrl: migrateEnv.migratorUrl,
     });
     await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
-    await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
+    await migrateAi({
+      migratorUrl: migrateEnv.migratorUrl,
+      superuserUrl: migrateEnv.superuserUrl,
+    });
     await provisionQueue(migrateEnv.migratorUrl);
     await resetIdentity();
     const created = await runBootstrap(process.env);
@@ -111,6 +114,7 @@ describe("ai http", { concurrency: 1 }, () => {
     await admin.connect();
     try {
       if (tenantId) {
+        await admin.query("DELETE FROM ai_knowledge_chunks WHERE tenant_id = $1", [tenantId]);
         await admin.query("DELETE FROM ai_action_proposals WHERE tenant_id = $1", [tenantId]);
         await admin.query("DELETE FROM ai_messages WHERE tenant_id = $1", [tenantId]);
         await admin.query("DELETE FROM ai_conversations WHERE tenant_id = $1", [tenantId]);
@@ -306,7 +310,91 @@ describe("ai http", { concurrency: 1 }, () => {
     assert.equal(latest.body.includes(NIK), false);
     assert.match(latest.body, /executed/u);
   });
+
+  it("ingests a tenant SOP and cites PP 58 without sending the NIK", async () => {
+    const blocked = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/ai/knowledge/sops",
+      headers: { origin, cookie: employeeCookie, "content-type": "application/json" },
+      payload: { title: "Employee SOP", text: "Employees do not upload policy." },
+    });
+    assert.equal(blocked.statusCode, 403);
+
+    const created = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/ai/knowledge/sops",
+      headers: { origin, cookie: ownerCookie, "content-type": "application/json" },
+      payload: { title: "Night shift", text: `Night shift handover ORCHID-HTTP. NIK ${NIK}.` },
+    });
+    assert.equal(created.statusCode, 200, created.body);
+    const documentId = readData(created.body).documentId;
+    assert.equal(typeof documentId, "string");
+    const pdf = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/ai/knowledge/sops",
+      headers: { origin, cookie: ownerCookie, "content-type": "application/json" },
+      payload: { title: "PDF SOP", pdfBase64: tinyPdf("PDF overtime note").toString("base64") },
+    });
+    assert.equal(pdf.statusCode, 200, pdf.body);
+
+    const listed = await composed.app.inject({
+      method: "GET",
+      url: "/api/v1/ai/knowledge/sops",
+      headers: { origin, cookie: ownerCookie },
+    });
+    assert.equal(listed.statusCode, 200, listed.body);
+    assert.equal(listed.body.includes("Night shift"), true);
+    assert.equal(listed.body.includes("PDF SOP"), true);
+    assert.equal(listed.body.includes(NIK), false);
+    const employeeList = await composed.app.inject({
+      method: "GET",
+      url: "/api/v1/ai/knowledge/sops",
+      headers: { origin, cookie: employeeCookie },
+    });
+    assert.equal(employeeList.statusCode, 403);
+
+    const answer = await chat(ownerCookie, "What does PP 58 say about withholding?", [
+      { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "PP 58 withholding" } }] },
+      { text: "See summary:pp-58-2023." },
+    ]);
+    assert.equal(answer.statusCode, 200, answer.body);
+    assert.equal(answer.body.includes("summary:pp-58-2023"), true);
+    assert.equal(answer.body.includes("not_the_statute"), true);
+    assert.equal(answer.body.includes(NIK), false);
+
+    const sop = await chat(ownerCookie, "Look up the night shift SOP.", [
+      { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "ORCHID-HTTP" } }] },
+      { text: "Cited." },
+    ]);
+    assert.equal(sop.statusCode, 200, sop.body);
+    assert.equal(sop.body.includes(NIK), false);
+    assert.equal(JSON.stringify(provider.requests).includes(NIK), false);
+
+    const removed = await composed.app.inject({
+      method: "DELETE",
+      url: `/api/v1/ai/knowledge/sops/${documentId ?? ""}`,
+      headers: { origin, cookie: ownerCookie },
+    });
+    assert.equal(removed.statusCode, 200, removed.body);
+    const pdfId = readData(pdf.body).documentId;
+    const removedPdf = await composed.app.inject({
+      method: "DELETE",
+      url: `/api/v1/ai/knowledge/sops/${pdfId ?? ""}`,
+      headers: { origin, cookie: ownerCookie },
+    });
+    assert.equal(removedPdf.statusCode, 200, removedPdf.body);
+  });
 });
+
+function tinyPdf(text: string): Buffer {
+  const stream = Buffer.from(`BT (${text}) Tj ET`);
+  return Buffer.concat([
+    Buffer.from("%PDF-1.4\n1 0 obj\n"),
+    Buffer.from(`<< /Length ${stream.length} >>\nstream\n`),
+    stream,
+    Buffer.from("\nendstream\nendobj\n%%EOF\n"),
+  ]);
+}
 
 async function ownerProposal(message: string): Promise<{ id: string; nonce: string }> {
   const response = await chat(ownerCookieRef, message, [
@@ -379,9 +467,19 @@ function readCode(body: string): string | undefined {
 function readData(body: string): {
   status?: string;
   message?: string;
+  documentId?: string;
   proposals?: Array<{ id: string; confirmationNonce: string }>;
 } {
-  return (JSON.parse(body) as { data: { status?: string; message?: string; proposals?: Array<{ id: string; confirmationNonce: string }> } }).data;
+  return (
+    JSON.parse(body) as {
+      data: {
+        status?: string;
+        message?: string;
+        documentId?: string;
+        proposals?: Array<{ id: string; confirmationNonce: string }>;
+      };
+    }
+  ).data;
 }
 
 function readSse(body: string): Array<{ event: string; data: Record<string, unknown> }> {
