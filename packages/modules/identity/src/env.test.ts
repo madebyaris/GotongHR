@@ -68,6 +68,9 @@ test("proxy trust defaults to one hop and cloudflare stays off", () => {
   ]);
   assert.equal(readTrustProxy({ GOTONG_TRUST_PROXY: "203.0.113.0/24" }), "203.0.113.0/24");
   assert.throws(() => readTrustProxy({ GOTONG_TRUST_PROXY: "not-an-address" }), /invalid/i);
+  assert.throws(() => readTrustProxy({ GOTONG_TRUST_PROXY: "10.0.0.1/" }), /invalid/i);
+  assert.throws(() => readTrustProxy({ GOTONG_TRUST_PROXY: "fd00::/" }), /invalid/i);
+  assert.throws(() => readTrustProxy({ GOTONG_TRUST_PROXY: "10.0.0.1/abc" }), /invalid/i);
   assert.equal(readTrustCloudflare({}), false);
   assert.equal(readTrustCloudflare({ GOTONG_TRUST_CLOUDFLARE: "true" }), true);
 });

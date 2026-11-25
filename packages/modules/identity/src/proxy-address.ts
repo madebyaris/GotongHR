@@ -108,6 +108,9 @@ function parseCidr(entry: string): Cidr {
   const bitsText = slash === -1 ? undefined : entry.slice(slash + 1);
   const ip = parseIp(addressText);
   if (!ip) throw new Error(`GOTONG_TRUST_PROXY address is invalid: ${entry}`);
+  if (bitsText !== undefined && !/^\d+$/u.test(bitsText)) {
+    throw new Error(`GOTONG_TRUST_PROXY address is invalid: ${entry}`);
+  }
   const maxBits = ip.kind === "v4" ? 32 : 128;
   const bits = bitsText === undefined ? maxBits : Number(bitsText);
   if (!Number.isInteger(bits) || bits < 0 || bits > maxBits) {
