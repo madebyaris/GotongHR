@@ -24,7 +24,7 @@ export interface PayrollAmounts {
   tableUndeclared: boolean;
 }
 
-export type ToolFailure = "forbidden" | "invalid" | "statutory_table_incomplete";
+export type ToolFailure = "forbidden" | "invalid" | "statutory_table_incomplete" | "search_unavailable";
 
 export type ToolDispatch =
   | { ok: false; code: ToolFailure }
@@ -48,7 +48,9 @@ interface ToolSpec {
 const SIMULATE = "simulate_payroll_item";
 const PROPOSE = "propose_employee_change";
 const FINALIZE = "propose_payroll_finalize";
+export const SEARCH_POLICY_KNOWLEDGE = "search_policy_knowledge";
 const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/u;
+const MAX_POLICY_QUERY = 200;
 
 const simulateParameters: Record<string, unknown> = {
   type: "object",
@@ -82,6 +84,15 @@ const proposeParameters: Record<string, unknown> = {
     legalEntityId: { type: "string" },
     field: { type: "string", enum: ["display_name", "ptkp_status"] },
     value: { type: "string" },
+  },
+};
+
+const searchParameters: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["query"],
+  properties: {
+    query: { type: "string", description: "Words from the policy question" },
   },
 };
 
@@ -124,6 +135,15 @@ const TOOLS: readonly ToolSpec[] = [
     mutating: true,
     visible: (caller) => caller.permissions.includes("payroll.run.finalize"),
   },
+  {
+    name: SEARCH_POLICY_KNOWLEDGE,
+    description:
+      "Search curated policy summaries and this tenant's SOP text. Quote citation_ref. not_the_statute means the text is not the statute. corpus_incomplete means the corpus is incomplete.",
+    parameters: searchParameters,
+    permission: "ai.knowledge.read",
+    mutating: false,
+    visible: (caller) => callerMaySearchPolicy(caller),
+  },
 ];
 
 export function toolsForCaller(caller: AiCaller): LlmToolDefinition[] {
@@ -140,6 +160,18 @@ export function isMutatingTool(name: string): boolean {
 
 export function proposalRequiresTotp(toolName: string): boolean {
   return toolName === FINALIZE;
+}
+
+export function callerMaySearchPolicy(caller: AiCaller): boolean {
+  return caller.permissions.includes("ai.knowledge.read");
+}
+
+export function parsePolicyQuery(args: unknown): string | null {
+  const record = asRecord(args);
+  if (!record || typeof record.query !== "string") return null;
+  const query = record.query.replace(/\s+/g, " ").trim();
+  if (query.length === 0 || query.length > MAX_POLICY_QUERY) return null;
+  return query;
 }
 
 export function dispatchTool(caller: AiCaller, name: string, args: unknown, table: StatutoryTable): ToolDispatch {

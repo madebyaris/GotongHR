@@ -25,6 +25,7 @@ const standIns = ["hr_secret", "att_secret", "pay_run"] as const;
 const requiredTenantTables = [
   "ai_action_proposals",
   "ai_conversations",
+  "ai_knowledge_chunks",
   "ai_messages",
   "att_secret",
   "aud_events",
@@ -48,6 +49,7 @@ const requiredTenantTables = [
 const platformDeniedTables = [
   "ai_action_proposals",
   "ai_conversations",
+  "ai_knowledge_chunks",
   "ai_messages",
   "hr_employee_pii",
   "hr_employees",
@@ -178,7 +180,18 @@ describe("tenant isolation", { concurrency: 1 }, () => {
         const visible = rowsOf(await tx.execute(sql.raw(statement)));
         assert.equal(visible.some((row) => row.id === ids.b), false, statement);
         assert.equal(visible.some((row) => row.id === ids.a), true, statement);
-        for (const row of visible) assert.equal(row.tenant_id, seeded.tenantA, statement);
+        if (table === "ai_knowledge_chunks") {
+          assert.equal(
+            visible.some((row) => row.tenant_id == null),
+            true,
+            statement,
+          );
+          for (const row of visible) {
+            assert.equal(row.tenant_id === seeded.tenantA || row.tenant_id == null, true, statement);
+          }
+        } else {
+          for (const row of visible) assert.equal(row.tenant_id, seeded.tenantA, statement);
+        }
       });
     }
 
@@ -214,6 +227,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       seeded.tenantB,
     );
     const deleteTargets = [
+      "ai_knowledge_chunks",
       "hr_employee_pii",
       "hr_employees",
       "ai_messages",
@@ -313,6 +327,111 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       const remaining = await admin.query(`SELECT 1 FROM ${ident(table)} WHERE id = $1::uuid`, [ids.b]);
       assert.equal(remaining.rowCount, 1, table);
     }
+  });
+
+  it("shares curated summaries and hides the other tenant's SOP chunks", async () => {
+    if (!app || !superuser || !seed) throw new Error("isolation setup did not open the database");
+    const database = app;
+    const admin = superuser;
+    const seeded = seed;
+    const ids = seeded.ids.get("ai_knowledge_chunks");
+    assert.ok(ids);
+    const statement =
+      "SELECT id::text AS id, tenant_id::text AS tenant_id, citation_ref, content FROM ai_knowledge_chunks";
+    assert.equal(/\bwhere\b/iu.test(statement), false);
+    const curated = [
+      "summary:pp-58-2023",
+      "summary:pmk-168-2023",
+      "summary:pp-35-2021",
+      "summary:uu-pdp-27-2022",
+    ];
+    for (const tenantId of [seeded.tenantA, seeded.tenantB]) {
+      const ownSop = tenantId === seeded.tenantA ? "sop:isolation-a" : "sop:isolation-b";
+      const otherSop = tenantId === seeded.tenantA ? "sop:isolation-b" : "sop:isolation-a";
+      const ownId = tenantId === seeded.tenantA ? ids.a : ids.b;
+      const otherId = tenantId === seeded.tenantA ? ids.b : ids.a;
+      await database.withTenantContext(tenantId, async (tx) => {
+        const visible = rowsOf(await tx.execute(sql.raw(statement))) as Array<{
+          id: string;
+          tenant_id: string | null;
+          citation_ref: string;
+          content: string;
+        }>;
+        assert.equal(visible.some((row) => row.id === otherId), false, tenantId);
+        assert.equal(visible.some((row) => row.citation_ref === otherSop), false, tenantId);
+        assert.equal(visible.some((row) => row.id === ownId && row.citation_ref === ownSop), true, tenantId);
+        for (const ref of curated) {
+          assert.equal(
+            visible.some((row) => row.citation_ref === ref && row.tenant_id == null),
+            true,
+            ref,
+          );
+        }
+        for (const row of visible) {
+          if (curated.includes(row.citation_ref)) {
+            assert.equal(row.content.toLowerCase().includes("not the statute"), true, row.citation_ref);
+          }
+        }
+      });
+    }
+    await database.withTenantContext(seeded.tenantB, async (tx) => {
+      await tx.execute(sql.raw("SAVEPOINT curated_probe"));
+      const updated = rowsOf(
+        await tx.execute(
+          sql.raw(
+            "UPDATE ai_knowledge_chunks SET title = 'changed' WHERE citation_ref = 'summary:pp-58-2023' RETURNING id::text AS id",
+          ),
+        ),
+      );
+      const removed = rowsOf(
+        await tx.execute(
+          sql.raw(
+            "DELETE FROM ai_knowledge_chunks WHERE citation_ref = 'summary:pp-58-2023' RETURNING id::text AS id",
+          ),
+        ),
+      );
+      assert.equal(updated.length, 0);
+      assert.equal(removed.length, 0);
+      await tx.execute(sql.raw("ROLLBACK TO SAVEPOINT curated_probe"));
+      await tx.execute(sql.raw("RELEASE SAVEPOINT curated_probe"));
+    });
+    const title = await admin.query<{ title: string }>(
+      "SELECT title FROM ai_knowledge_chunks WHERE citation_ref = 'summary:pp-58-2023'",
+    );
+    assert.equal(title.rows[0]?.title.includes("changed"), false);
+    await assert.rejects(
+      () =>
+        database.withTenantContext(seeded.tenantA, (tx) =>
+          tx.execute(sql`
+            INSERT INTO ai_knowledge_chunks (
+              tenant_id, source_type, citation_ref, title, content, is_statute_text, document_id, chunk_index
+            ) VALUES (
+              NULL, 'curated_summary', 'summary:isolation-hack', 'Hack', 'not the statute', false, uuidv7(), 0
+            )
+          `),
+        ),
+      (error: unknown) => permissionCode(error) === "42501",
+    );
+    await assert.rejects(
+      () =>
+        database.withTenantContext(seeded.tenantA, (tx) =>
+          tx.execute(sql`
+            INSERT INTO ai_knowledge_chunks (
+              tenant_id, source_type, citation_ref, title, content, is_statute_text, document_id, chunk_index
+            ) VALUES (
+              ${seeded.tenantB}::uuid,
+              'tenant_sop',
+              'sop:isolation-steal',
+              'Steal',
+              'secret',
+              false,
+              uuidv7(),
+              0
+            )
+          `),
+        ),
+      (error: unknown) => permissionCode(error) === "42501",
+    );
   });
 });
 
@@ -523,6 +642,10 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const messageB = randomUUID();
   const proposalA = randomUUID();
   const proposalB = randomUUID();
+  const chunkA = randomUUID();
+  const chunkB = randomUUID();
+  const sopDocA = randomUUID();
+  const sopDocB = randomUUID();
   const emailA = `${tenantA}@isolation.test`;
   const emailB = `${tenantB}@isolation.test`;
 
@@ -684,6 +807,14 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
          ($2, $4, $6, $8, 'isolation', '{}'::jsonb, '{}'::jsonb, repeat('cd', 32), now() + interval '15 minutes')`,
       [proposalA, proposalB, tenantA, tenantB, conversationA, conversationB, userA, userB],
     );
+    await superuser.query(
+      `INSERT INTO ai_knowledge_chunks (
+         id, tenant_id, source_type, citation_ref, title, content, is_statute_text, document_id, chunk_index
+       ) VALUES
+         ($1, $3, 'tenant_sop', 'sop:isolation-a', 'SOP A', 'tenant a night shift sop', false, $5, 0),
+         ($2, $4, 'tenant_sop', 'sop:isolation-b', 'SOP B', 'tenant b night shift sop', false, $6, 0)`,
+      [chunkA, chunkB, tenantA, tenantB, sopDocA, sopDocB],
+    );
     await superuser.query("COMMIT");
   } catch (error) {
     await superuser.query("ROLLBACK");
@@ -703,6 +834,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
     ids: new Map([
       ["ai_action_proposals", { a: proposalA, b: proposalB }],
       ["ai_conversations", { a: conversationA, b: conversationB }],
+      ["ai_knowledge_chunks", { a: chunkA, b: chunkB }],
       ["ai_messages", { a: messageA, b: messageB }],
       ["att_secret", { a: attA, b: attB }],
       ["aud_events", { a: eventA, b: eventB }],
@@ -727,6 +859,7 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
 
 async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   const tenants = [seed.tenantA, seed.tenantB];
+  await superuser.query("DELETE FROM ai_knowledge_chunks WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_messages WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_action_proposals WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM ai_conversations WHERE tenant_id = ANY($1::uuid[])", [tenants]);

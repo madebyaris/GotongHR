@@ -126,4 +126,15 @@ test("an employee cannot see privileged tools or another salary", () => {
   assert.equal(amounts[0]?.unit, "idr");
   assert.equal(amounts[0]?.amount, "15000000");
   assert.equal(dispatchTool(hr, "propose_payroll_finalize", { payrollRunId: "x" }, syntheticTable()).ok, false);
+  const reader = caller({
+    role: "hr_admin",
+    permissions: ["ai.knowledge.read"],
+    selfOnly: false,
+  });
+  assert.equal(toolsForCaller(reader).some((tool) => tool.name === "search_policy_knowledge"), true);
+  assert.equal(toolsForCaller(employee).some((tool) => tool.name === "search_policy_knowledge"), false);
+  assert.deepEqual(dispatchTool(employee, "search_policy_knowledge", { query: "PP 58" }, syntheticTable()), {
+    ok: false,
+    code: "forbidden",
+  });
 });

@@ -32,7 +32,8 @@ import {
   touchConversation,
   type ProposalRow,
 } from "./store.ts";
-import { dispatchTool, isMutatingTool, proposalRequiresTotp, toolsForCaller } from "./tools.ts";
+import { deleteTenantSop, ingestTenantSop, listTenantSops, runPolicySearch, type SopIngestInput } from "./knowledge.ts";
+import { dispatchTool, isMutatingTool, proposalRequiresTotp, SEARCH_POLICY_KNOWLEDGE, toolsForCaller } from "./tools.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_MESSAGE = 8_000;
@@ -40,6 +41,9 @@ const MAX_ROUNDS = 3;
 
 const SYSTEM_PROMPT =
   "You are the GotongHR assistant. Use only the provided tools. Do not calculate tax, BPJS, or leave balances yourself. A mutating tool does not change records until a person confirms it.";
+
+const POLICY_PROMPT =
+  " For a policy question, call search_policy_knowledge and quote each citation_ref you rely on. When not_the_statute is true, the text is not the statute. When corpus_incomplete is true, say the corpus is incomplete. Do not present a summary as official statute text.";
 
 export interface AiFailure {
   ok: false;
@@ -67,9 +71,15 @@ export interface ThreadMessage {
   content: string;
 }
 
+export interface ThreadCitation {
+  citationRef: string;
+  notTheStatute: boolean;
+}
+
 export interface ConversationThread {
   conversationId: string | null;
   messages: ThreadMessage[];
+  citations: ThreadCitation[];
   proposals: ProposalView[];
 }
 
@@ -133,6 +143,31 @@ export interface AiRuntime {
     signal?: AbortSignal,
   ): AsyncGenerator<ChatStreamEvent>;
   readLatest(caller: AiCaller): Promise<{ ok: true; data: ConversationThread } | AiFailure>;
+  ingestSop(
+    caller: AiCaller,
+    input: SopIngestInput,
+    meta: RequestMeta,
+  ): Promise<{ ok: true; data: { documentId: string; title: string; citationRef: string; chunkCount: number } } | AiFailure>;
+  listSops(caller: AiCaller): Promise<
+    | {
+        ok: true;
+        data: {
+          documents: Array<{
+            documentId: string;
+            title: string;
+            citationRef: string;
+            chunkCount: number;
+            createdAt: string;
+          }>;
+        };
+      }
+    | AiFailure
+  >;
+  deleteSop(
+    caller: AiCaller,
+    documentId: string,
+    meta: RequestMeta,
+  ): Promise<{ ok: true; data: { documentId: string; deletedChunks: number } } | AiFailure>;
 }
 
 export function draftStatutoryTable(): StatutoryTable {
@@ -183,6 +218,37 @@ export function createAiRuntime(deps: AiRuntimeDeps): AiRuntime {
     },
     readLatest(caller) {
       return readLatest(deps, sessionFor, caller);
+    },
+    async ingestSop(caller, input, meta) {
+      const result = await ingestTenantSop(deps.database, caller, input);
+      if (!result.ok) return result;
+      await writeAudit(deps, caller, meta, {
+        action: "ai.knowledge.ingested",
+        resourceType: "ai_knowledge_chunk",
+        resourceId: result.data.documentId,
+        aiProposalId: null,
+        diff: {
+          documentId: result.data.documentId,
+          citationRef: result.data.citationRef,
+          chunkCount: result.data.chunkCount,
+        },
+      });
+      return result;
+    },
+    listSops(caller) {
+      return listTenantSops(deps.database, caller);
+    },
+    async deleteSop(caller, documentId, meta) {
+      const result = await deleteTenantSop(deps.database, caller, documentId);
+      if (!result.ok) return result;
+      await writeAudit(deps, caller, meta, {
+        action: "ai.knowledge.deleted",
+        resourceType: "ai_knowledge_chunk",
+        resourceId: result.data.documentId,
+        aiProposalId: null,
+        diff: { documentId: result.data.documentId, deletedChunks: result.data.deletedChunks },
+      });
+      return result;
     },
   };
 }
@@ -246,7 +312,7 @@ async function chat(
   const tools = toolsForCaller(caller);
   const history = await deps.database.withTenantContext(caller.tenantId, (tx) => listMessages(tx, conversationId));
   const messages: LlmMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt(tools) },
     ...history.map((row) => messageFromRow(row)),
   ];
   log({ msg: "ai chat", conversationId });
@@ -353,7 +419,10 @@ async function handleTool(
   proposal: ProposalView | null;
   echoArguments: boolean;
 }> {
-  const dispatched = dispatchTool(caller, call.name, call.arguments, loadTable());
+  const dispatched =
+    call.name === SEARCH_POLICY_KNOWLEDGE
+      ? await runPolicySearch(deps.database, caller, call.arguments)
+      : dispatchTool(caller, call.name, call.arguments, loadTable());
   if (!dispatched.ok) {
     await writeAudit(deps, caller, meta, {
       action: "ai.tool.denied",
@@ -591,6 +660,42 @@ async function appendAudit(
   });
 }
 
+function citationsFromRows(rows: Array<{ role: string; content_redacted: string }>): ThreadCitation[] {
+  const seen = new Set<string>();
+  const citations: ThreadCitation[] = [];
+  for (const row of rows) {
+    if (row.role !== "tool") continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(row.content_redacted);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const matches = (parsed as { matches?: unknown }).matches;
+    if (!Array.isArray(matches)) continue;
+    for (const match of matches) {
+      if (!match || typeof match !== "object") continue;
+      const record = match as { citation_ref?: unknown; not_the_statute?: unknown };
+      if (typeof record.citation_ref !== "string" || record.citation_ref.length === 0 || record.citation_ref.length > 160) {
+        continue;
+      }
+      if (seen.has(record.citation_ref)) continue;
+      seen.add(record.citation_ref);
+      citations.push({
+        citationRef: record.citation_ref,
+        notTheStatute: record.not_the_statute !== false,
+      });
+    }
+  }
+  return citations;
+}
+
+function systemPrompt(tools: readonly LlmToolDefinition[]): string {
+  if (!tools.some((tool) => tool.name === SEARCH_POLICY_KNOWLEDGE)) return SYSTEM_PROMPT;
+  return `${SYSTEM_PROMPT}${POLICY_PROMPT}`;
+}
+
 function failure(status: AiFailure["status"], code: string, message: string): AiFailure {
   return { ok: false, status, code, message };
 }
@@ -692,7 +797,7 @@ async function readLatest(
   return deps.database.withTenantContext(caller.tenantId, async (tx) => {
     const conversationId = await latestConversationId(tx, caller.userId);
     if (!conversationId) {
-      return { ok: true as const, data: { conversationId: null, messages: [], proposals: [] } };
+      return { ok: true as const, data: { conversationId: null, messages: [], citations: [], proposals: [] } };
     }
     const rows = await listMessages(tx, conversationId);
     const messages: ThreadMessage[] = [];
@@ -701,10 +806,11 @@ async function readLatest(
       if (row.role === "assistant" && row.content_redacted.trim().length === 0) continue;
       messages.push({ role: row.role, content: row.content_redacted });
     }
+    const citations = citationsFromRows(rows);
     const proposals = (await listOwnProposals(tx, caller.userId))
       .filter((row) => row.conversation_id === conversationId)
       .map((row) => cardProposal(presentProposal(row, sessionFor, caller, null, false)));
-    return { ok: true as const, data: { conversationId, messages, proposals } };
+    return { ok: true as const, data: { conversationId, messages, citations, proposals } };
   });
 }
 

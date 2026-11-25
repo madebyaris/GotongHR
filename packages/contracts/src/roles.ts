@@ -63,8 +63,9 @@ export const roleScopeDefaults: Record<RoleCode, RoleScopeDefault> = {
  * Seed copied into `id_roles` when a tenant is created. The request guard
  * checks that stored array. Changing this map does not update an existing
  * tenant, and `roleHasPermission` reads the seed, so it can disagree with a
- * row that was edited later. Identity migrate appends `employee.read` and
- * `employee.write` onto the built-in roles that have them here.
+ * row that was edited later. Identity migrate appends `employee.read`,
+ * `employee.write`, `ai.knowledge.read`, and `ai.knowledge.write` onto the
+ * built-in roles that have them here.
  *
  * `org_owner` may finalize a payroll run and may not prepare or create one.
  * `hr_admin` and `payroll_admin` prepare. The preparer is not the finalizer.
@@ -83,6 +84,8 @@ export const rolePermissions = {
     "payroll.run.finalize",
     "payroll.coretax.export",
     "ai.action.approve",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
     "audit.log.read",
     "tenant.support_grant.write",
   ],
@@ -95,6 +98,8 @@ export const rolePermissions = {
     "payroll.run.prepare",
     "payroll.run.create",
     "ai.action.approve",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
   ],
   payroll_admin: [
     "employee.read",
@@ -102,8 +107,9 @@ export const rolePermissions = {
     "payroll.run.prepare",
     "payroll.run.create",
     "payroll.coretax.export",
+    "ai.knowledge.read",
   ],
-  finance_viewer: ["audit.log.read"],
+  finance_viewer: ["audit.log.read", "ai.knowledge.read"],
   branch_manager: ["attendance.approve"],
   line_manager: ["attendance.approve"],
   employee: [],
@@ -112,6 +118,8 @@ export const rolePermissions = {
     "audit.log.read",
     "employee.pii.read",
     "tenant.support_grant.write",
+    "ai.knowledge.read",
+    "ai.knowledge.write",
   ],
 } as const satisfies Record<RoleCode, readonly PermissionAtom[]>;
 

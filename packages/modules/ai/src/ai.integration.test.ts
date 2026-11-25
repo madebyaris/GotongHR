@@ -51,7 +51,10 @@ describe("ai assistant", { concurrency: 1 }, () => {
   before(async () => {
     const migrateEnv = migrateEnvFrom(process.env);
     await migrate(migrateEnv);
-    await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
+    await migrateAi({
+      migratorUrl: migrateEnv.migratorUrl,
+      superuserUrl: migrateEnv.superuserUrl,
+    });
     app = createTenantDatabase(requiredEnv(process.env, "DATABASE_URL_APP"));
     platform = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_PLATFORM") });
     superuser = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
@@ -60,6 +63,7 @@ describe("ai assistant", { concurrency: 1 }, () => {
   });
 
   after(async () => {
+    await superuser.query("DELETE FROM ai_knowledge_chunks WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await superuser.query("DELETE FROM ai_messages WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await superuser.query("DELETE FROM ai_action_proposals WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
     await superuser.query("DELETE FROM ai_conversations WHERE tenant_id = ANY($1::uuid[])", [[tenantA, tenantB]]);
@@ -409,7 +413,126 @@ describe("ai assistant", { concurrency: 1 }, () => {
     assert.equal(JSON.stringify(thread.data).includes("15000000"), true);
     assertNoSamples(JSON.stringify(thread.data));
   });
+
+  it("quotes the fixture citation and keeps SOP PII out of the model payload", async () => {
+    const harness = harnessFor(app);
+    const reader = hrCaller(tenantA, userA, true);
+    reader.permissions = [...reader.permissions, "ai.knowledge.read", "ai.knowledge.write"];
+    const ingested = await harness.runtime.ingestSop(
+      reader,
+      { title: "Night shift", text: `Night shift handover ORCHID-NIGHT. NIK ${NIK}.` },
+      meta,
+    );
+    assert.equal(ingested.ok, true);
+    if (!ingested.ok) return;
+    const listed = await harness.runtime.listSops(reader);
+    assert.equal(listed.ok, true);
+    if (!listed.ok) return;
+    assert.equal(listed.data.documents.some((item) => item.citationRef === ingested.data.citationRef), true);
+    const deniedList = await harness.runtime.listSops(employeeCaller(tenantA, userB));
+    assert.equal(deniedList.ok, false);
+
+    const policy = await harness.runtime.chat(
+      reader,
+      {
+        message: "What does PP 58 say about withholding?",
+        script: [
+          { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "PP 58 withholding" } }] },
+          { text: "See summary:pp-58-2023. This is not the statute." },
+        ],
+      },
+      meta,
+    );
+    assert.equal(policy.ok, true);
+    if (!policy.ok) return;
+    const policyTools = toolBody(harness.provider.requests, 0);
+    assert.equal(policyTools.includes("summary:pp-58-2023"), true);
+    assert.equal(policyTools.includes("not_the_statute"), true);
+    assert.equal(policyTools.includes("corpus_incomplete"), true);
+    assert.equal(harness.provider.requests[0]?.messages[0]?.content.includes("citation_ref"), true);
+    assert.equal(harness.provider.requests[0]?.messages[0]?.content.includes("not the statute"), true);
+    assert.equal(harness.provider.requests[0]?.messages[0]?.content.includes("incomplete"), true);
+    const saved = await harness.runtime.readLatest(reader);
+    assert.equal(saved.ok, true);
+    if (!saved.ok) return;
+    assert.equal(
+      saved.data.citations.some((item) => item.citationRef === "summary:pp-58-2023" && item.notTheStatute),
+      true,
+    );
+
+    const mark = harness.provider.requests.length;
+    const sop = await harness.runtime.chat(
+      reader,
+      {
+        message: "Look up the night shift SOP.",
+        script: [
+          { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "ORCHID-NIGHT" } }] },
+          { text: "See the SOP citation." },
+        ],
+      },
+      meta,
+    );
+    assert.equal(sop.ok, true);
+    const sopTools = toolBody(harness.provider.requests, mark);
+    assert.equal(sopTools.includes(ingested.data.citationRef), true);
+    assert.equal(sopTools.includes("ORCHID-NIGHT"), true);
+    assert.equal(sopTools.includes("[EMP_01_NIK]"), true);
+    assert.equal(sopTools.includes(NIK), false);
+    assert.equal(JSON.stringify(harness.provider.requests).includes(NIK), false);
+    assert.equal(JSON.stringify(harness.auditEvents).includes(NIK), false);
+
+    const outsider = hrCaller(tenantB, userB, true);
+    outsider.permissions = [...outsider.permissions, "ai.knowledge.read"];
+    const hiddenMark = harness.provider.requests.length;
+    const hidden = await harness.runtime.chat(
+      outsider,
+      {
+        message: "Look up the night shift SOP.",
+        script: [
+          { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "ORCHID-NIGHT" } }] },
+          { text: "Nothing." },
+        ],
+      },
+      meta,
+    );
+    assert.equal(hidden.ok, true);
+    const hiddenTools = toolBody(harness.provider.requests, hiddenMark);
+    assert.equal(hiddenTools.includes("Night shift handover"), false);
+    assert.equal(hiddenTools.includes(NIK), false);
+
+    const blockedMark = harness.provider.requests.length;
+    const blocked = await harness.runtime.chat(
+      employeeCaller(tenantA, userA),
+      {
+        message: "Look up the night shift SOP.",
+        script: [
+          { toolCalls: [{ name: "search_policy_knowledge", arguments: { query: "ORCHID-NIGHT" } }] },
+          { text: "No." },
+        ],
+      },
+      meta,
+    );
+    assert.equal(blocked.ok, true);
+    const blockedTools = toolBody(harness.provider.requests, blockedMark);
+    assert.equal(blockedTools.includes("forbidden"), true);
+    assert.equal(blockedTools.includes("ORCHID-NIGHT"), false);
+    assert.equal(blockedTools.includes(NIK), false);
+
+    const removed = await harness.runtime.deleteSop(reader, ingested.data.documentId, meta);
+    assert.equal(removed.ok, true);
+    if (!removed.ok) return;
+    const afterDelete = await harness.runtime.listSops(reader);
+    assert.equal(afterDelete.ok, true);
+    if (!afterDelete.ok) return;
+    assert.equal(afterDelete.data.documents.some((item) => item.documentId === ingested.data.documentId), false);
+  });
 });
+
+function toolBody(requests: Array<{ messages: Array<{ role: string; content: string }> }>, from: number): string {
+  return JSON.stringify(
+    requests.slice(from).flatMap((request) => request.messages.filter((message) => message.role === "tool")),
+  );
+}
 
 function syntheticTable(): StatutoryTable {
   const file = new URL("../../../payroll-engine/src/__tests__/fixtures/synthetic-pph21.json", import.meta.url);
