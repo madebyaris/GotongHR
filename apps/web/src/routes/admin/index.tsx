@@ -16,6 +16,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError, apiData } from "@/lib/api";
 import { fieldClass, SetupColumn, SetupHeader, TextField } from "../shell";
+import { AdminFrame } from "./frame";
 
 const timezones = [
   { value: "Asia/Jakarta", label: "WIB · Jakarta" },
@@ -36,6 +37,14 @@ const fieldOrder = [
 ];
 
 export default function AdminPage() {
+  return (
+    <AdminFrame>
+      <CompanyPage />
+    </AdminFrame>
+  );
+}
+
+function CompanyPage() {
   const navigate = useNavigate();
   const query = useQuery({
     queryKey: ["me", "context"],

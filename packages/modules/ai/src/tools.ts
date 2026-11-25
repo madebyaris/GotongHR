@@ -47,6 +47,8 @@ interface ToolSpec {
 
 const SIMULATE = "simulate_payroll_item";
 const PROPOSE = "propose_employee_change";
+const FINALIZE = "propose_payroll_finalize";
+const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/u;
 
 const simulateParameters: Record<string, unknown> = {
   type: "object",
@@ -83,6 +85,17 @@ const proposeParameters: Record<string, unknown> = {
   },
 };
 
+const finalizeParameters: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["payrollRunId", "periodLabel", "netPayIdr"],
+  properties: {
+    payrollRunId: { type: "string" },
+    periodLabel: { type: "string", description: "YYYY-MM" },
+    netPayIdr: { type: "string", description: "Integer rupiah" },
+  },
+};
+
 const TOOLS: readonly ToolSpec[] = [
   {
     name: SIMULATE,
@@ -102,6 +115,15 @@ const TOOLS: readonly ToolSpec[] = [
     mutating: true,
     visible: (caller) => canSee(caller, "ai.action.approve"),
   },
+  {
+    name: FINALIZE,
+    description:
+      "Propose finalizing one payroll run. This does not finalize the run. A person must confirm it with an authenticator code.",
+    parameters: finalizeParameters,
+    permission: "payroll.run.finalize",
+    mutating: true,
+    visible: (caller) => caller.permissions.includes("payroll.run.finalize"),
+  },
 ];
 
 export function toolsForCaller(caller: AiCaller): LlmToolDefinition[] {
@@ -116,9 +138,14 @@ export function isMutatingTool(name: string): boolean {
   return TOOLS.some((tool) => tool.name === name && tool.mutating);
 }
 
+export function proposalRequiresTotp(toolName: string): boolean {
+  return toolName === FINALIZE;
+}
+
 export function dispatchTool(caller: AiCaller, name: string, args: unknown, table: StatutoryTable): ToolDispatch {
   if (name === SIMULATE) return dispatchSimulate(caller, args, table);
   if (name === PROPOSE) return dispatchPropose(caller, args);
+  if (name === FINALIZE) return dispatchFinalize(caller, args);
   return { ok: false, code: "forbidden" };
 }
 
@@ -200,6 +227,7 @@ function dispatchPropose(caller: AiCaller, args: unknown): ToolDispatch {
   if (!employeeInScope(caller, parsed.employeeId, parsed.branchId, parsed.legalEntityId)) {
     return { ok: false, code: "forbidden" };
   }
+  const label = parsed.field === "display_name" ? "Display name" : "PTKP status";
   return {
     ok: true,
     mutating: true,
@@ -211,11 +239,40 @@ function dispatchPropose(caller: AiCaller, args: unknown): ToolDispatch {
       ...(parsed.legalEntityId ? { legalEntityId: parsed.legalEntityId } : {}),
     },
     impact: {
-      summary: "Update an employee field after confirmation.",
+      summary: `Update ${label} after confirmation.`,
       employeeId: parsed.employeeId,
       field: parsed.field,
       nextValue: parsed.value,
+      requiresTotp: false,
+      diff: [{ label, before: null, after: parsed.value }],
+      amounts: [],
       warnings: ["Nothing changes until you confirm."],
+    },
+  };
+}
+
+function dispatchFinalize(caller: AiCaller, args: unknown): ToolDispatch {
+  const parsed = parseFinalize(args);
+  if (!parsed) return { ok: false, code: "invalid" };
+  if (!caller.permissions.includes("payroll.run.finalize")) return { ok: false, code: "forbidden" };
+  return {
+    ok: true,
+    mutating: true,
+    arguments: {
+      payrollRunId: parsed.payrollRunId,
+      periodLabel: parsed.periodLabel,
+      netPayIdr: parsed.netPayIdr,
+    },
+    impact: {
+      summary: `Finalize payroll ${parsed.periodLabel}.`,
+      requiresTotp: true,
+      payrollRunId: parsed.payrollRunId,
+      diff: [{ label: "Run status", before: "draft", after: "finalized" }],
+      amounts: [{ unit: "idr", label: "Net pay", amount: parsed.netPayIdr }],
+      warnings: [
+        "Finalizing payroll needs an authenticator code.",
+        "Nothing changes until you confirm.",
+      ],
     },
   };
 }
@@ -319,6 +376,20 @@ function parseSimulate(args: unknown): SimulateArgs | null {
     employerJkm,
     employerBpjsKesehatan,
   };
+}
+
+function parseFinalize(args: unknown): {
+  payrollRunId: string;
+  periodLabel: string;
+  netPayIdr: string;
+} | null {
+  const record = asRecord(args);
+  if (!record) return null;
+  const payrollRunId = readUuid(record.payrollRunId);
+  const periodLabel = typeof record.periodLabel === "string" && PERIOD.test(record.periodLabel) ? record.periodLabel : null;
+  const netPayIdr = typeof record.netPayIdr === "string" && IDR.test(record.netPayIdr) ? record.netPayIdr : null;
+  if (!payrollRunId || !periodLabel || !netPayIdr) return null;
+  return { payrollRunId, periodLabel, netPayIdr };
 }
 
 function parsePropose(args: unknown): {

@@ -12,6 +12,7 @@ import { queryClient } from "./lib/query";
 const HomePage = lazy(() => import("./routes/home"));
 const SignInPage = lazy(() => import("./routes/sign-in"));
 const AdminPage = lazy(() => import("./routes/admin/index"));
+const AssistantPage = lazy(() => import("./routes/admin/assistant"));
 const EssPage = lazy(() => import("./routes/ess/index"));
 
 function Root() {
@@ -44,13 +45,19 @@ const adminRoute = createRoute({
   component: AdminPage,
 });
 
+const assistantRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/assistant",
+  component: AssistantPage,
+});
+
 const essRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/ess",
   component: EssPage,
 });
 
-const children: AnyRoute[] = [indexRoute, signInRoute, adminRoute, essRoute];
+const children: AnyRoute[] = [indexRoute, signInRoute, adminRoute, assistantRoute, essRoute];
 
 if (
   import.meta.env.VITE_DEPLOYMENT_MODE === "multi_tenant_saas" ||
