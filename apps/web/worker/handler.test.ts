@@ -248,6 +248,43 @@ test("an upstream redirect is returned to the browser", async () => {
   assert.equal(response.headers.get("location"), "https://hr.example.co.id/ess");
 });
 
+test("the upstream timer stops once response headers arrive", async () => {
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const armed: Array<ReturnType<typeof setTimeout>> = [];
+  let cleared = 0;
+  globalThis.setTimeout = ((handler: () => void, timeout?: number) => {
+    assert.equal(timeout, UPSTREAM_TIMEOUT_MS);
+    const id = originalSet(handler, 60_000);
+    armed.push(id);
+    return id;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: ReturnType<typeof setTimeout>) => {
+    cleared += 1;
+    originalClear(id);
+  }) as typeof clearTimeout;
+  try {
+    const response = await handleRequest(
+      new Request("https://hr.example.co.id/api/readyz"),
+      env({ API_ORIGIN: "https://origin.example.co.id", ENVIRONMENT: "production" }),
+      {
+        assets: () => Promise.reject(new Error("assets")),
+        upstream: (_input, init) => {
+          assert.equal(init.signal?.aborted, false);
+          return Promise.resolve(new Response("ok"));
+        },
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(cleared, 1);
+    assert.equal(armed.length, 1);
+  } finally {
+    globalThis.setTimeout = originalSet;
+    globalThis.clearTimeout = originalClear;
+    for (const id of armed) originalClear(id);
+  }
+});
+
 test("an unreachable API origin returns 502 without storing the response", async () => {
   const response = await handleRequest(
     new Request("https://hr.example.co.id/api/readyz"),

@@ -42,9 +42,9 @@ The Worker forwards `Origin`, `Cookie`, and the browser `Host` as `X-Forwarded-H
 
 An `api.` hostname is the other layout. Leave `API_ORIGIN` unset so this Worker does not proxy. Point `api.example.co.id` at the tunnel. The SPA then calls that host from the browser. That needs CORS on the API and a `connect-src` change in both `apps/web/worker/headers.ts` and `apps/web/public/_headers`. This repo does not add that CORS policy. Prefer the same-origin proxy.
 
-Do not skip `http_request_firewall_custom` or `http_ratelimit` by hostname. A skip for `origin.example.co.id` also matches someone who opens that name directly, so the WAF and the rate limits would not run. Keep both phases enabled on every public hostname.
+Do not skip `http_request_firewall_custom` or `http_ratelimit` by hostname. A skip for `origin.example.co.id` also matches someone who opens that name directly.
 
-Prefer a tunnel. The tunnel hostname is not a public proxied name, and the Worker subrequest does not cross the zone rules a second time. If the origin has to be a proxied name on the same zone, leave the rules on. A second evaluation is the safe result. You can also require a credential that only this Worker sends and that the origin checks. That credential does not replace the rules. This repository does not add a hostname skip.
+Prefer a tunnel. If `API_ORIGIN` is a proxied hostname in the same zone, Cloudflare does not apply custom WAF rules to the Worker subrequest. Rate-limit rules may still count that subrequest. Keep both phases enabled so a direct request to the origin hostname is still checked. Do not add a hostname skip. You can also require a credential that only this Worker sends and that the origin checks. That credential does not replace the rules.
 
 ## Cache
 
@@ -58,7 +58,7 @@ Prefer a tunnel. The tunnel hostname is not a public proxied name, and the Worke
 
 `/*` sets the short HTML lifetime, so `/` and a SPA route such as `/clock-in` revalidate after a deploy. Later rules replace that value for hashed assets, `/api`, and `/auth`.
 
-Responses also send `Strict-Transport-Security: max-age=31536000`. `includeSubDomains` is off, so a new hostname is not pinned before it has a certificate. `preload` is off. Preload is a permanent browser-list submission. Turn those two on in the zone HSTS screen only after every name in the zone is HTTPS.
+Responses also send `Strict-Transport-Security: max-age=31536000`. `includeSubDomains` is off, so a new hostname is not pinned before it has a certificate. `preload` is off. Preload is difficult to reverse. Removal can take months to reach browsers. Turn those two on in the zone HSTS screen only after every name in the zone is HTTPS.
 
 The cache rules in `infra/cloudflare/rulesets/cache-rules.json` repeat the bypass at the zone. The first matching rule wins. API and auth bypass first. `/assets/*` then stores HTTP 200 at the edge for 31536000 seconds. The edge default for every other status is 0, which is no-cache. `status_code_ttl` also sets 400–499 and 500–599 to 0, so a removed hashed file is not kept for a year. Value 0 means no-cache. It does not mean a one-year store. Browser TTL follows the origin, so `apps/web/public/_headers` is what the browser sees, including `immutable` on `/assets/*`. A Better Auth session cookie bypasses cache on every other path. The cookie name checked is `better-auth.session_token`, which also matches the `__Secure-` prefix. Hashed assets stay cached for a logged-in browser, because those URLs change when the bytes change.
 
@@ -103,7 +103,7 @@ Custom WAF rules:
 - Block dotfiles, backup extensions, and common probe paths. `/.well-known/` stays open.
 - Block methods outside GET, HEAD, POST, PUT, PATCH, DELETE, and OPTIONS.
 - Block `/api/platform` and `/api/v1/platform` unless a Cloudflare Access JWT cookie, `Cf-Access-Jwt-Assertion`, or `CF-Access-Client-Id` is present. The header check stops anonymous scans. Access still has to validate the credential.
-- On `/api/auth/`, block known scanner user agents. The query is lowercased. The rule matches `../`, `<script`, `%2e%2e`, `%3cscript`, and encoded traversal that contains `%2f` (`..%2f`, `%2e%2e%2f`, `%2f%2e%2e`). A bare `%2f` is not a match, because an auth query can carry an encoded URL. The rule does not use country, threat score, or bot score, and it does not challenge. Telkomsel, XL, Indosat, Tri, Smartfren, and office NAT stay through.
+- On `/api/auth/`, block known scanner user agents. The query is lowercased. The path check also uses `url_decode`, so `/api/auth/%2e%2e%2ffoo` matches `../`. The rule matches `../`, `<script`, `%2e%2e`, `%3cscript`, and encoded traversal that contains `%2f` (`..%2f`, `%2e%2e%2f`, `%2f%2e%2e`). A bare `%2f` is not a match, because an auth query can carry an encoded URL. The rule does not use country, threat score, or bot score, and it does not challenge. Telkomsel, XL, Indosat, Tri, Smartfren, and office NAT stay through.
 
 Rate limits count by `cf.colo.id` and `ip.src`. They do not count by a cookie or a header, because a client can rotate those and get a new counter. One office is one IP at one colo. The whole budget can be spent in the first seconds of the window.
 
@@ -113,7 +113,7 @@ Rate limits count by `cf.colo.id` and `ip.src`. They do not count by a cookie or
 | `/api/auth/two-factor*` | 90 | 60 seconds |
 | `/api/auth/forget-password*` | 30 | 120 seconds |
 | `/api/attendance/clock*`, `/api/v1/attendance/clock*` | 180 | 10 seconds |
-| `/api/v1/mobile/clock*` | none at the edge | per user and device in the API |
+| `/api/v1/mobile/clock*` | none at the edge | none in the API yet, required after Slice 1.1 |
 | `/api/ai/*` | 60 | 30 seconds |
 
 180 office clock-in requests cover 30 people with a status read and retries at 08:00 WIB. A limit of 10 or 30 per minute would block that office. `/api/v1/attendance/clock` is included so a versioned mount is covered. Periods of 60 seconds need a plan that allows that period. If the account only allows 10 second periods, keep `requests_per_period` at least 120 for office clock-in.

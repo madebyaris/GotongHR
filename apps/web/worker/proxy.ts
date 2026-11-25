@@ -137,18 +137,24 @@ export async function proxyApi(
     return errorResponse(502, "bad_gateway", "API origin is invalid.");
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, UPSTREAM_TIMEOUT_MS);
   let upstreamResponse: Response;
   try {
     const init: RequestInit = {
       method: request.method,
       headers: forwardedHeaders(request),
       redirect: "manual",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      signal: controller.signal,
     };
     if (bounded.body !== undefined) init.body = bounded.body;
     upstreamResponse = await upstream(upstreamUrl, init);
   } catch {
     return errorResponse(502, "bad_gateway", "API origin is unreachable.");
+  } finally {
+    clearTimeout(timer);
   }
 
   return withSecurityHeaders(sanitizeUpstream(upstreamResponse), {
@@ -191,7 +197,7 @@ async function readRequestBody(request: Request): Promise<{ body?: ArrayBuffer }
     merged.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return { body: merged.buffer.slice(0, size) };
+  return { body: merged.buffer };
 }
 
 function sanitizeUpstream(response: Response): Response {

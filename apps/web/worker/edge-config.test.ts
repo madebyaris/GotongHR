@@ -124,6 +124,7 @@ test("WAF ruleset blocks probes and methods without challenging Indonesian netwo
   const auth = ruleMatching(ruleset, "/api/auth/");
   assert.equal(auth.action, "block");
   assert.match(auth.expression, /sqlmap/);
+  assert.match(auth.expression, /url_decode\(http\.request\.uri\.path\) contains "\.\.\/"/);
   assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "\.\.\/"/);
   assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "<script"/);
   assert.match(auth.expression, /lower\(http\.request\.uri\.query\) contains "%2e%2e"/);
@@ -170,6 +171,9 @@ test("rate limits let a 30-person office NAT clock in together", () => {
     ruleset.rules.some((rule) => rule.expression.includes("/api/v1/mobile/clock")),
     false,
   );
+  assert.match(clock.description, /No per-user limit exists in the API yet/);
+  assert.match(clock.description, /Slice 1\.1/);
+  assert.doesNotMatch(clock.description, /limited per user in the API/);
 });
 
 test("cache rules never store API or auth and keep hashed assets for a year", () => {
@@ -225,7 +229,9 @@ test("API-only Caddy trusts the zone origin-pull CA and Cloudflare hops", () => 
   assert.equal(trusted.length, 22);
   assert.ok(trusted.includes("173.245.48.0/20"));
   assert.ok(trusted.includes("2c0f:f248::/32"));
-  assert.equal(readRepo("infra/caddy/certs/.gitignore").includes("!.gitignore"), true);
+  const certIgnore = readRepo("infra/caddy/certs/.gitignore").split("\n").map((line) => line.trim());
+  assert.ok(certIgnore.includes("*"));
+  assert.ok(certIgnore.includes("!.gitignore"));
 });
 
 test("Cloudflare compose drops the static frontend and caps the tunnel", () => {
@@ -255,9 +261,12 @@ test("edge docs keep the WAF on and describe the zone origin-pull CA", () => {
   assert.doesNotMatch(readme, /Add a skip rule/);
   assert.match(readme, /cloudflare-zone-origin-pull-ca\.pem/);
   assert.match(readme, /Leave the global Authenticated Origin Pulls toggle off/);
+  assert.match(readme, /does not apply custom WAF rules to the Worker subrequest/);
   assert.match(readme, /includeSubDomains/);
   assert.match(readme, /preload/);
+  assert.match(readme, /difficult to reverse/);
   assert.match(readme, /\/api\/v1\/mobile\/clock/);
+  assert.match(readme, /none in the API yet, required after Slice 1\.1/);
   assert.match(readme, /CGNAT/);
   assert.doesNotMatch(readme, /authenticated_origin_pull_ca\.pem`\. That CA is the one to trust/);
 });
