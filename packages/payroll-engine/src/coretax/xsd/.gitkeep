@@ -1,0 +1,1 @@
+# Drop official DJP .xsd files in this directory. Tests skip with "xsd missing" until one is here. Do not download schemas from CI.

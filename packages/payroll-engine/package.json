@@ -11,20 +11,28 @@
     "./draft": {
       "types": "./dist/tables/draft-2026.d.ts",
       "import": "./dist/tables/draft-2026.js"
+    },
+    "./coretax": {
+      "types": "./dist/coretax/index.d.ts",
+      "import": "./dist/coretax/index.js"
+    },
+    "./bank-batch": {
+      "types": "./dist/bank-batch/index.d.ts",
+      "import": "./dist/bank-batch/index.js"
     }
   },
   "scripts": {
     "prebuild": "pnpm --filter @gotonghr/contracts build",
-    "build": "tsc -p tsconfig.build.json && mkdir -p dist/tables && cp src/tables/*.json dist/tables/",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
     "pretypecheck": "pnpm --filter @gotonghr/contracts build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "pretest": "pnpm --filter @gotonghr/contracts build",
     "test": "node --experimental-strip-types --test --test-reporter spec src/__tests__/*.test.ts",
     "pretest:invariants": "pnpm --filter @gotonghr/contracts build",
-    "test:invariants": "node --experimental-strip-types --test --test-reporter spec src/__tests__/invariants.test.ts",
+    "test:invariants": "node --experimental-strip-types --test --test-reporter spec src/__tests__/invariants*.test.ts",
     "pretest:golden": "pnpm --filter @gotonghr/contracts build",
-    "test:golden": "node --experimental-strip-types --test --test-reporter spec src/__tests__/golden.test.ts"
+    "test:golden": "node --experimental-strip-types --test --test-reporter spec src/__tests__/golden*.test.ts"
   },
   "dependencies": {
     "@gotonghr/contracts": "workspace:*"
