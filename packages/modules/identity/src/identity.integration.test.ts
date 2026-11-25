@@ -664,6 +664,8 @@ async function resetIdentity(): Promise<void> {
   try {
     await admin.query(`
       TRUNCATE TABLE
+        id_branches,
+        id_legal_entities,
         id_sessions,
         id_memberships,
         id_users,

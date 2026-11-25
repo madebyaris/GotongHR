@@ -1,4 +1,5 @@
 import {
+  canWriteOrg,
   fail,
   isPrivilegedRole,
   permissionRequiresPrivilegedTotp,
@@ -36,13 +37,23 @@ interface AuthSession {
 
 /**
  * Order: session, tenant header, permission, then TOTP for privileged payroll/PII.
- * Scope flags are attached for later slices. This slice does not filter rows by them.
+ * Scope flags are attached for later slices. Org routes filter rows by them.
+ * Company setup is not a payroll or PII route, so it does not ask for TOTP.
  */
 export function requirePermission(atom: PermissionAtom) {
-  return async function permissionGuard(
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<void> {
+  return requireAuth({ atom });
+}
+
+export function requireMember() {
+  return requireAuth({});
+}
+
+export function requireOrgWriter() {
+  return requireAuth({ orgWrite: true });
+}
+
+function requireAuth(options: { atom?: PermissionAtom; orgWrite?: boolean }) {
+  return async function authGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const handle = request.server.gotongIdentity;
     if (!handle) throw new Error("Identity plugin is not registered.");
     const session = readSession(
@@ -67,13 +78,21 @@ export function requirePermission(atom: PermissionAtom) {
       await reply.code(400).send(fail("tenant_required", "Choose a tenant."));
       return;
     }
-    if (!selected.permissions.includes(atom)) {
+    if (options.atom && !selected.permissions.includes(options.atom)) {
       await reply.code(403).send(fail("forbidden", "Missing permission."));
+      return;
+    }
+    if (options.orgWrite && !canWriteOrg(selected.role)) {
+      await reply.code(403).send(fail("forbidden", "Only an owner or HR admin can change the company."));
       return;
     }
     const twoFactorEnabled = session.user.twoFactorEnabled === true;
     let sessionTotpVerified = false;
-    if (permissionRequiresPrivilegedTotp(atom) && isPrivilegedRole(selected.role)) {
+    if (
+      options.atom &&
+      permissionRequiresPrivilegedTotp(options.atom) &&
+      isPrivilegedRole(selected.role)
+    ) {
       if (!twoFactorEnabled) {
         await reply.code(403).send(
           fail(

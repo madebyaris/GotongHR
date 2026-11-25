@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fail, ok } from "./envelope.ts";
+import { fail, failWithFields, ok } from "./envelope.ts";
+import {
+  canWriteOrg,
+  idrToJson,
+  parseBranchCreate,
+  parseLegalEntityCreate,
+  parseNitku22,
+  parseNpwp16,
+  parseUmpIdr,
+} from "./org.ts";
 import { idr } from "./idr.ts";
 import { isPermissionAtom, permissionAtoms } from "./permissions.ts";
 import {
@@ -33,6 +42,72 @@ test("the JSON envelope keeps data, meta, and error together", () => {
     meta: { page: 1 },
     error: { code: "not_ready", message: "database" },
   });
+});
+
+test("field errors name the field and keep the envelope", () => {
+  assert.deepEqual(
+    failWithFields("invalid_field", "Check the highlighted fields.", [
+      { field: "nitku22", message: "NITKU must be 22 digits." },
+    ]),
+    {
+      data: null,
+      meta: null,
+      error: {
+        code: "invalid_field",
+        message: "Check the highlighted fields.",
+        fields: [{ field: "nitku22", message: "NITKU must be 22 digits." }],
+      },
+    },
+  );
+});
+
+test("NPWP is 16 digits and NITKU is 22 digits", () => {
+  assert.equal(parseNpwp16("0123456789012345").ok, true);
+  assert.equal(parseNpwp16("123456789012345").ok, false);
+  assert.equal(parseNpwp16("12345678901234567").ok, false);
+  assert.equal(parseNpwp16("01.234.567.8-901.234").ok, false);
+  assert.equal(parseNitku22("0123456789012345678901").ok, true);
+  assert.equal(parseNitku22("123456789012345678901").ok, false);
+  assert.equal(parseNitku22("12345678901234567890123").ok, false);
+  assert.equal(parseNitku22("012345678901234567890A").ok, false);
+  const entity = parseLegalEntityCreate({
+    companyName: " PT Surya ",
+    npwp16: "0123456789012345",
+  });
+  assert.equal(entity.ok, true);
+  if (entity.ok) assert.equal(entity.value.companyName, "PT Surya");
+});
+
+test("UMP is non-negative bigint rupiah, including values above the JSON safe integer", () => {
+  const grouped = parseUmpIdr("5.396.761");
+  assert.equal(grouped.ok, true);
+  if (grouped.ok) assert.equal(grouped.value, 5396761n);
+  const asNumber = parseUmpIdr(5396761);
+  assert.equal(asNumber.ok, true);
+  if (asNumber.ok) assert.equal(idrToJson(asNumber.value), "5396761");
+  const huge = parseUmpIdr("9007199254740993");
+  assert.equal(huge.ok, true);
+  if (huge.ok) assert.equal(idrToJson(huge.value), "9007199254740993");
+  assert.equal(parseUmpIdr(1.5).ok, false);
+  assert.equal(parseUmpIdr(-1).ok, false);
+  assert.equal(parseUmpIdr("9223372036854775808").ok, false);
+  assert.equal(parseUmpIdr(Number.MAX_SAFE_INTEGER + 2).ok, false);
+  const branch = parseBranchCreate({
+    legalEntityId: "018f3a4c-7b2a-7c3d-8e4f-123456789abc",
+    name: "Jakarta Pusat",
+    nitku22: "123",
+    timezone: "WIB",
+    umpUmkIdr: "5.396.761",
+  });
+  assert.equal(branch.ok, false);
+  if (!branch.ok) {
+    assert.equal(branch.fields.some((field) => field.field === "nitku22"), true);
+    assert.equal(branch.fields.some((field) => field.field === "timezone"), true);
+  }
+  assert.equal(canWriteOrg("org_owner"), true);
+  assert.equal(canWriteOrg("hr_admin"), true);
+  assert.equal(canWriteOrg("payroll_admin"), false);
+  assert.equal(canWriteOrg("employee"), false);
 });
 
 test("idr accepts only bigint rupiah", () => {

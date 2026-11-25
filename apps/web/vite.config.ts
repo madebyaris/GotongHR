@@ -5,6 +5,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { compression } from "vite-plugin-compression2";
 
+const apiProxy = {
+  "/api": {
+    target: process.env.VITE_API_PROXY ?? "http://127.0.0.1:3000",
+  },
+};
+
 export default defineConfig({
   plugins: [
     react(),
@@ -30,4 +36,6 @@ export default defineConfig({
     manifest: true,
     sourcemap: false,
   },
+  server: { proxy: apiProxy },
+  preview: { proxy: apiProxy },
 });
