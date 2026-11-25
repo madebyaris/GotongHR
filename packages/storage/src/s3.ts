@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { assertObjectKey, tokenExpiry } from "./keys.ts";
@@ -17,6 +17,19 @@ export interface S3StorageOptions {
 
 export interface S3ObjectStorage extends ObjectStorage {
   kind: "s3";
+}
+
+function isMissingObject(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = "name" in error && typeof error.name === "string" ? error.name : "";
+  if (name === "NotFound" || name === "NoSuchKey") return true;
+  const meta = "$metadata" in error ? error.$metadata : undefined;
+  return Boolean(
+    meta &&
+      typeof meta === "object" &&
+      "httpStatusCode" in meta &&
+      (meta as { httpStatusCode?: unknown }).httpStatusCode === 404,
+  );
 }
 
 function lifetime(expiresInSeconds: number | undefined): number {
@@ -64,6 +77,25 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
         { expiresIn: lifetime(input.expiresInSeconds) },
       );
       return { url, method: "GET" };
+    },
+    async openRead(input) {
+      assertObjectKey(input.key);
+      const response = await client.send(new GetObjectCommand({ Bucket: options.bucket, Key: input.key }));
+      const body = response.Body;
+      if (!body || typeof body !== "object" || !(Symbol.asyncIterator in body)) {
+        throw new Error("Object body is not a stream.");
+      }
+      return body as AsyncIterable<Uint8Array>;
+    },
+    async stat(input) {
+      assertObjectKey(input.key);
+      try {
+        const head = await client.send(new HeadObjectCommand({ Bucket: options.bucket, Key: input.key }));
+        return { byteSize: head.ContentLength ?? 0 };
+      } catch (error) {
+        if (isMissingObject(error)) return null;
+        throw error;
+      }
     },
     async delete(input) {
       assertObjectKey(input.key);

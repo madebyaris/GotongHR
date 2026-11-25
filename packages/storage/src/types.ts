@@ -25,8 +25,15 @@ export interface PresignedGet {
   method: "GET";
 }
 
+export interface ObjectStat {
+  byteSize: number;
+}
+
 export interface ObjectStorage {
   presignPut(input: PresignPutInput): Promise<PresignedPut>;
   presignGet(input: { key: string; expiresInSeconds?: number }): Promise<PresignedGet>;
+  /** Byte stream for one object. Callers read it line by line and do not buffer the object. */
+  openRead(input: { key: string }): Promise<AsyncIterable<Uint8Array | string>>;
+  stat(input: { key: string }): Promise<ObjectStat | null>;
   delete(input: { key: string }): Promise<void>;
 }
