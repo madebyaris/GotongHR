@@ -16,4 +16,7 @@ test("defaultFakeSteps proposes the named display name and ignores other chat", 
     value: "Sari",
   });
   assert.equal(defaultFakeSteps("What is the cutoff?").length, 0);
+  const policy = defaultFakeSteps("What does PP 58 say about withholding?");
+  assert.equal(policy[0]?.toolCalls?.[0]?.name, "search_policy_knowledge");
+  assert.equal(policy[1]?.text?.includes("not the statute"), true);
 });

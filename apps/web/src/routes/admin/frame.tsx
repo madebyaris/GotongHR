@@ -8,9 +8,9 @@ export function AdminFrame({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="border-b border-border">
-        <div className="mx-auto flex w-full max-w-xl items-center justify-between gap-3 px-4 py-2">
+        <div className="mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2">
           <p className="text-sm font-medium text-muted-foreground">GotongHR</p>
-          <nav aria-label="Admin" className="flex gap-4">
+          <nav aria-label="Admin" className="flex flex-wrap justify-end gap-x-4">
             <Link to="/admin" className={linkClass} activeOptions={{ exact: true }}>
               Company
             </Link>
