@@ -9,12 +9,7 @@ export { createSupportGrantAuditPort } from "./support-grant-audit.ts";
 export { migrateAudit } from "./migrate.ts";
 export type { AuditMigrateInput } from "./migrate.ts";
 export { appendAuditEvent, auditedUpdate } from "./mutation.ts";
-export type {
-  AppendAuditEventInput,
-  AuditedUpdateInput,
-  AuditedUpdateResult,
-  SqlValue,
-} from "./mutation.ts";
+export type { AppendAuditEventInput, AuditedUpdateInput, AuditedUpdateResult, SqlValue } from "./mutation.ts";
 export { enqueueOutboxEvent } from "./outbox.ts";
 export type { OutboxInput } from "./outbox.ts";
 export { redactPii } from "./redact.ts";

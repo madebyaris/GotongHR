@@ -1,4 +1,5 @@
 import { createSupportGrantAuditPort } from "@gotonghr/audit";
+import type { DomainActionExecutor } from "@gotonghr/contracts";
 import { registerCoreHr } from "@gotonghr/core-hr";
 import {
   applyDatabaseUrls,
@@ -7,6 +8,7 @@ import {
   requiredEnv,
   type TenantDatabase,
 } from "@gotonghr/db";
+import type { AiRuntimeDeps, LlmProvider } from "@gotonghr/ai";
 import {
   createAuth,
   hashPassword,
@@ -25,6 +27,7 @@ import {
 import { verifyStatutoryPayload } from "./statutory-verifier.ts";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
+import { registerTenantAi } from "./ai.ts";
 import { readConfig, type AppConfig } from "./config.ts";
 import { platformReaders } from "./platform-auth.ts";
 import { buildServer } from "./server.ts";
@@ -40,7 +43,16 @@ export interface ComposedApp {
   close(): Promise<void>;
 }
 
-export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<ComposedApp> {
+export interface ComposeOptions {
+  aiDomain?: DomainActionExecutor;
+  aiProvider?: LlmProvider;
+  aiLoadTable?: AiRuntimeDeps["loadTable"];
+}
+
+export async function composeFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  options: ComposeOptions = {},
+): Promise<ComposedApp> {
   loadRepoEnv();
   applyDatabaseUrls(env);
   const config = readConfig(env);
@@ -93,6 +105,13 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
           userAgent: typeof agent === "string" ? agent : null,
         };
       },
+    });
+    await registerTenantAi(app, {
+      database: appDb,
+      env,
+      ...(options.aiDomain ? { domain: options.aiDomain } : {}),
+      ...(options.aiProvider ? { provider: options.aiProvider } : {}),
+      ...(options.aiLoadTable ? { loadTable: options.aiLoadTable } : {}),
     });
     const readers = platformReaders({ auth, platform: platformDb });
     await registerPlatform(app, {

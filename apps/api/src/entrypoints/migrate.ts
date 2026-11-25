@@ -1,3 +1,4 @@
+import { migrateAi } from "@gotonghr/ai";
 import { migrateAudit } from "@gotonghr/audit";
 import { migrateCoreHr } from "@gotonghr/core-hr";
 import { applyDatabaseUrls, loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
   });
   await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
   await migrateCoreHr({ migratorUrl: migrateEnv.migratorUrl });
+  await migrateAi({ migratorUrl: migrateEnv.migratorUrl });
   await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
 }
 
