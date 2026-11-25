@@ -1,0 +1,15 @@
+export { dispatchOutboxOnce, OUTBOX_QUEUE, startOutboxDispatcher } from "./dispatcher.ts";
+export type { OutboxDispatchResult } from "./dispatcher.ts";
+export { AuditChainError } from "./errors.ts";
+export { hashChainEnabledFromEnv, verifyChain } from "./hash-chain.ts";
+export type { ChainVerification, StoredAuditEvent } from "./hash-chain.ts";
+export { provisionTenantKeys } from "./keys.ts";
+export { migrateAudit } from "./migrate.ts";
+export type { AuditMigrateInput } from "./migrate.ts";
+export { auditedUpdate } from "./mutation.ts";
+export type { AuditedUpdateInput, AuditedUpdateResult, SqlValue } from "./mutation.ts";
+export { enqueueOutboxEvent } from "./outbox.ts";
+export type { OutboxInput } from "./outbox.ts";
+export { redactPii } from "./redact.ts";
+export { audEvents, audOutboxEvents, audPiiAccessLogs, audTenantKeys } from "./schema.ts";
+export { verifyTenantHashChain } from "./verify.ts";

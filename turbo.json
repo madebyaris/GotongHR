@@ -40,7 +40,9 @@
         "GOTONG_TRUST_PROXY",
         "GOTONG_TRUST_CLOUDFLARE",
         "GOTONG_AUTH_RATE_LIMIT_MAX",
-        "GOTONG_AUTH_RATE_LIMIT_WINDOW_MS"
+        "GOTONG_AUTH_RATE_LIMIT_WINDOW_MS",
+        "GOTONG_PII_KEK",
+        "AUDIT_HASH_CHAIN"
       ]
     },
     "build": {

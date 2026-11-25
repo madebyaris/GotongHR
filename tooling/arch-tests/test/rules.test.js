@@ -12,7 +12,14 @@ test("architecture rules cover module boundaries", () => {
     "payroll-engine-stays-pure",
     "payslip-pdf-stays-pure",
     "web-does-not-import-server",
+    "no-crypto-in-payroll-payslip-or-web",
   ]);
+  const crypto = config.forbidden.find((rule) => rule.name === "no-crypto-in-payroll-payslip-or-web");
+  assert.match(crypto.from.path, /payroll-engine/);
+  assert.match(crypto.from.path, /payslip-pdf/);
+  assert.match(crypto.from.path, /apps\/web/);
+  assert.match(crypto.to.path, /@gotonghr\/crypto/);
+  assert.match(crypto.to.path, /packages\/crypto/);
   const payslip = config.forbidden.find((rule) => rule.name === "payslip-pdf-stays-pure");
   assert.match(payslip.from.path, /payslip-pdf/);
   assert.match(payslip.to.path, /puppeteer/);
