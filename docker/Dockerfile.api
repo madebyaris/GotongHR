@@ -1,0 +1,17 @@
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+RUN corepack enable
+WORKDIR /repo
+COPY . .
+RUN corepack pnpm install --frozen-lockfile
+RUN corepack pnpm --filter @gotonghr/api... build
+RUN corepack pnpm deploy --filter @gotonghr/api --prod --legacy /out
+
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NODE_OPTIONS=--max-old-space-size=512
+COPY --from=build --chown=node:node /out /app
+RUN mkdir -p /app/.data && chown node:node /app/.data
+USER node
+EXPOSE 3000
+CMD ["node", "dist/entrypoints/monolith.js"]

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "lint": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": [
+        "DATABASE_URL_SUPERUSER",
+        "DATABASE_URL_MIGRATOR",
+        "DATABASE_URL_APP",
+        "DATABASE_URL_PLATFORM",
+        "DATABASE_URL_QUEUE",
+        "MIGRATOR_PASSWORD",
+        "APP_PASSWORD",
+        "PLATFORM_PASSWORD",
+        "QUEUE_PASSWORD",
+        "STORAGE_DRIVER",
+        "STORAGE_LOCAL_SECRET",
+        "STORAGE_LOCAL_ROOT",
+        "STORAGE_URL_PREFIX",
+        "QUEUE_DRIVER",
+        "GOTONG_ROLE",
+        "GOTONG_DEPLOYMENT_MODE",
+        "NODE_ENV"
+      ]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    }
+  }
+}

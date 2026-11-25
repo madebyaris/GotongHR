@@ -1,0 +1,23 @@
+# 1 GB profile. Memory caps match the architecture spec.
+# Postgres GUCs below replace the 2 GB values that do not fit in 384 MB.
+services:
+  postgres:
+    mem_limit: 384m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - maintenance_work_mem=32MB
+      - -c
+      - work_mem=2MB
+
+  api:
+    mem_limit: 384m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=320
+
+  caddy:
+    mem_limit: 64m

@@ -1,0 +1,26 @@
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS build
+RUN corepack enable
+WORKDIR /repo
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/api/package.json apps/api/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/storage/package.json packages/storage/package.json
+COPY tooling/arch-tests/package.json tooling/arch-tests/package.json
+COPY tooling/eslint-config/package.json tooling/eslint-config/package.json
+RUN corepack pnpm install --frozen-lockfile --filter @gotonghr/web...
+COPY . .
+RUN corepack pnpm --filter @gotonghr/web... build
+
+# The pinned image has no caddy account. Create one before the chown copy.
+FROM caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+RUN addgroup -S -g 1000 caddy \
+ && adduser -S -D -H -u 1000 -G caddy -g caddy -h /var/lib/caddy -s /sbin/nologin caddy \
+ && mkdir -p /config/caddy /data/caddy /srv \
+ && chown -R caddy:caddy /config /data /srv /etc/caddy \
+ && chmod 755 /config /config/caddy /data /data/caddy /srv /etc/caddy
+COPY --chown=caddy:caddy docker/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build --chown=caddy:caddy /repo/apps/web/dist /srv
+USER caddy
