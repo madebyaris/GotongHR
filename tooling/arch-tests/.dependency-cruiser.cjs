@@ -39,6 +39,16 @@ module.exports = {
       from: { path: "^apps/web/" },
       to: { path: "^packages/(modules|db)(/|$)" },
     },
+    {
+      name: "no-crypto-in-payroll-payslip-or-web",
+      severity: "error",
+      comment:
+        "packages/payroll-engine, packages/payslip-pdf, and apps/web cannot import @gotonghr/crypto.",
+      from: { path: "^(packages/payroll-engine|packages/payslip-pdf|apps/web)/" },
+      to: {
+        path: "(^|/)node_modules/@gotonghr/crypto(/|$)|^packages/crypto(/|$)",
+      },
+    },
   ],
   options: {
     doNotFollow: { path: "node_modules" },

@@ -1,3 +1,4 @@
+import { migrateAudit } from "@gotonghr/audit";
 import { applyDatabaseUrls, loadRepoEnv, migrate, migrateEnvFrom, requiredEnv } from "@gotonghr/db";
 import { migrateIdentity } from "@gotonghr/identity";
 import { provisionQueue } from "../queue.ts";
@@ -11,6 +12,7 @@ async function main(): Promise<void> {
     superuserUrl: migrateEnv.superuserUrl,
     migratorUrl: migrateEnv.migratorUrl,
   });
+  await migrateAudit({ migratorUrl: migrateEnv.migratorUrl });
   await provisionQueue(requiredEnv(process.env, "DATABASE_URL_MIGRATOR"));
 }
 
