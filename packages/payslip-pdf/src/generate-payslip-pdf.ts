@@ -173,6 +173,22 @@ function hairline(doc: PDFKit.PDFDocument, y: number): number {
   return y + 6;
 }
 
+function amountLayout(doc: PDFKit.PDFDocument): {
+  width: number;
+  amountWidth: number;
+  labelWidth: number;
+} {
+  const width = contentWidth(doc);
+  const amountWidth = 120;
+  return { width, amountWidth, labelWidth: width - amountWidth - 12 };
+}
+
+function amountRowHeight(doc: PDFKit.PDFDocument, label: string, emphasis: boolean): number {
+  const { labelWidth } = amountLayout(doc);
+  doc.font(emphasis ? "Helvetica-Bold" : "Helvetica").fontSize(9);
+  return doc.heightOfString(label, { width: labelWidth }) + 3;
+}
+
 function amountRow(
   doc: PDFKit.PDFDocument,
   y: number,
@@ -180,16 +196,16 @@ function amountRow(
   amount: string,
   emphasis: boolean,
 ): number {
-  const width = contentWidth(doc);
-  const amountWidth = 120;
+  const { width, amountWidth, labelWidth } = amountLayout(doc);
   doc.font(emphasis ? "Helvetica-Bold" : "Helvetica").fontSize(9).fillColor(INK);
-  doc.text(label, MARGIN_X, y, { width: width - amountWidth - 12, lineBreak: false });
+  const labelHeight = doc.heightOfString(label, { width: labelWidth });
+  doc.text(label, MARGIN_X, y, { width: labelWidth });
   doc.text(amount, MARGIN_X + width - amountWidth, y, {
     width: amountWidth,
     align: "right",
     lineBreak: false,
   });
-  return y + 14;
+  return y + labelHeight + 3;
 }
 
 function drawHeader(doc: PDFKit.PDFDocument, payslip: PayslipDto, y: number): number {
@@ -267,29 +283,34 @@ function drawAmountSection(
   y = sectionLabel(doc, y, title);
   let total = 0n;
   for (const line of lines) {
-    y = ensureSpace(doc, y, 16, payslip.tableUndeclared);
-    y = amountRow(doc, y, bilingual(line.labelId, line.labelEn), formatIdr(line.amountIdr), false);
+    const label = bilingual(line.labelId, line.labelEn);
+    const rowHeight = amountRowHeight(doc, label, false);
+    y = ensureSpace(doc, y, rowHeight, payslip.tableUndeclared);
+    y = amountRow(doc, y, label, formatIdr(line.amountIdr), false);
     total += line.amountIdr;
   }
   y = hairline(doc, y);
-  y = ensureSpace(doc, y, 16, payslip.tableUndeclared);
+  const totalHeight = amountRowHeight(doc, totalLabel, true);
+  y = ensureSpace(doc, y, totalHeight, payslip.tableUndeclared);
   y = amountRow(doc, y, totalLabel, formatIdr(total), true);
   return y + 12;
 }
 
 function drawBpjs(doc: PDFKit.PDFDocument, payslip: PayslipDto, y: number): number {
-  y = ensureSpace(doc, y, 36, payslip.tableUndeclared);
+  y = ensureSpace(doc, y, 52, payslip.tableUndeclared);
   y = sectionLabel(doc, y, "RINCIAN BPJS / BPJS BREAKDOWN");
   doc.font("Helvetica").fontSize(8).fillColor(MUTED);
+  const noteWidth = contentWidth(doc);
+  const lineHeight = doc.currentLineHeight();
   doc.text("Kolom perusahaan tidak dipotong dari gaji bersih.", MARGIN_X, y, {
-    width: contentWidth(doc),
+    width: noteWidth,
     lineBreak: false,
   });
-  doc.text("The employer column is not deducted from take-home pay.", MARGIN_X, doc.y + 1, {
-    width: contentWidth(doc),
+  doc.text("The employer column is not deducted from take-home pay.", MARGIN_X, y + lineHeight, {
+    width: noteWidth,
     lineBreak: false,
   });
-  y = doc.y + 8;
+  y += lineHeight * 2 + 8;
   y = ensureSpace(doc, y, 16, payslip.tableUndeclared);
   y = bpjsRow(doc, y, "", "Karyawan / Employee", "Perusahaan / Employer", true);
   for (const row of BPJS_ROWS) {

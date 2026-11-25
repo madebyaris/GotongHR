@@ -15,7 +15,9 @@ export function passwordFromDateOfBirth(dateOfBirth: string): string {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  const utc = new Date(Date.UTC(year, month - 1, day));
+  // Date.UTC treats years 0–99 as 1900–1999. setUTCFullYear keeps the parsed year.
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
   if (
     utc.getUTCFullYear() !== year ||
     utc.getUTCMonth() !== month - 1 ||

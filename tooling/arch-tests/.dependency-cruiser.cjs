@@ -29,7 +29,7 @@ module.exports = {
         "packages/payslip-pdf cannot import a database, HTTP, storage, Chromium, or another module.",
       from: { path: "^packages/payslip-pdf/" },
       to: {
-        path: "(^|/)node_modules/(drizzle-orm|pg|postgres|fastify|@aws-sdk|@gotonghr/db|@gotonghr/storage|puppeteer|puppeteer-core|playwright|playwright-core|@sparticuz/chromium|chrome-aws-lambda|undici|axios|node-fetch)(/|$)|^packages/(modules|db|storage)/|^(node:)?(http|https)$",
+        path: "(^|/)node_modules/(drizzle-orm|pg|postgres|fastify|@fastify|@aws-sdk|@gotonghr/db|@gotonghr/storage|puppeteer|puppeteer-core|playwright|playwright-core|@sparticuz/chromium|chrome-aws-lambda|undici|axios|node-fetch)(/|$)|^packages/(modules|db|storage)/|^(node:)?(http|https)$",
       },
     },
     {
