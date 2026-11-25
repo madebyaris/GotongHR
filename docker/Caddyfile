@@ -5,6 +5,14 @@
 }
 
 :8080 {
+	handle /_headers {
+		respond 404
+	}
+
+	handle /.assetsignore {
+		respond 404
+	}
+
 	handle_path /api/* {
 		encode zstd gzip
 		reverse_proxy api:3000

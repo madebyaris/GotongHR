@@ -96,3 +96,57 @@ console.log(`admin brotli ${admin} bytes (cap ${ADMIN_CAP})`);
 if (ess > ESS_CAP || admin > ADMIN_CAP) {
   process.exit(1);
 }
+
+const headersFile = path.join(dist, "_headers");
+if (!existsSync(headersFile)) {
+  console.error("dist/_headers is missing. Cloudflare asset headers will not deploy.");
+  process.exit(1);
+}
+const headersText = readFileSync(headersFile, "utf8");
+const privatePaths = ["/api", "/api/auth/sign-in", "/auth", "/auth/sign-in"];
+for (const pathname of privatePaths) {
+  if (cacheControlFor(headersText, pathname) !== "private, no-store") {
+    console.error(`dist/_headers does not keep ${pathname} uncached.`);
+    process.exit(1);
+  }
+}
+if (cacheControlFor(headersText, "/assets/app-abc123.js") !== "public, max-age=31536000, immutable") {
+  console.error("dist/_headers does not set immutable caching on hashed assets.");
+  process.exit(1);
+}
+
+function cacheControlFor(fileText, pathname) {
+  const headers = new Map();
+  let pattern = "";
+  for (const rawLine of fileText.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    if (!rawLine.startsWith(" ") && !rawLine.startsWith("\t")) {
+      pattern = line;
+      continue;
+    }
+    if (!headerPathMatches(pattern, pathname)) continue;
+    if (line.startsWith("! ")) {
+      headers.delete(line.slice(2).trim().toLowerCase());
+      continue;
+    }
+    const splitAt = line.indexOf(":");
+    if (splitAt <= 0) {
+      console.error(`dist/_headers has a bad line: ${line}`);
+      process.exit(1);
+    }
+    const name = line.slice(0, splitAt).trim().toLowerCase();
+    const value = line.slice(splitAt + 1).trim();
+    const existing = headers.get(name);
+    headers.set(name, existing === undefined ? value : `${existing}, ${value}`);
+  }
+  return headers.get("cache-control");
+}
+
+function headerPathMatches(pattern, pathname) {
+  if (!pattern.includes("*")) return pattern === pathname;
+  const star = pattern.indexOf("*");
+  const prefix = pattern.slice(0, star);
+  const suffix = pattern.slice(star + 1);
+  return pathname.startsWith(prefix) && pathname.endsWith(suffix) && pathname.length >= prefix.length + suffix.length;
+}
