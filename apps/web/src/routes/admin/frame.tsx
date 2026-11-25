@@ -14,6 +14,9 @@ export function AdminFrame({ children }: { children: ReactNode }) {
             <Link to="/admin" className={linkClass} activeOptions={{ exact: true }}>
               Company
             </Link>
+            <Link to="/admin/employees" className={linkClass}>
+              Employees
+            </Link>
             <Link to="/admin/assistant" className={linkClass}>
               Assistant
             </Link>

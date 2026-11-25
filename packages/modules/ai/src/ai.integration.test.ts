@@ -170,6 +170,7 @@ describe("ai assistant", { concurrency: 1 }, () => {
   });
 
   it("confirms a proposal once and rejects every other confirm", async () => {
+    const employeesBefore = await employeeVaultState(superuser);
     const harness = harnessFor(app);
     const owner = hrCaller(tenantA, userA, true);
     const other = hrCaller(tenantA, userB, true);
@@ -229,8 +230,7 @@ describe("ai assistant", { concurrency: 1 }, () => {
     if (secondReject.ok) return;
     assert.equal(secondReject.status, 409);
     assert.equal(harness.executions.includes(rejected.id), false);
-    const employees = await superuser.query<{ name: string | null }>("SELECT to_regclass('hr_employees')::text AS name");
-    assert.equal(employees.rows[0]?.name ?? null, null);
+    assert.deepEqual(await employeeVaultState(superuser), employeesBefore);
   });
 
   it("simulates with the payroll engine and hides another salary from an employee", async () => {
@@ -455,6 +455,14 @@ function employeeCaller(tenantId: string, userId: string): AiCaller {
     selfEmployeeId: null,
     sessionTotpVerified: false,
   };
+}
+
+async function employeeVaultState(admin: pg.Client): Promise<{ name: string | null; rows: number }> {
+  const found = await admin.query<{ name: string | null }>("SELECT to_regclass('hr_employees')::text AS name");
+  const name = found.rows[0]?.name ?? null;
+  if (!name) return { name: null, rows: 0 };
+  const count = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM hr_employees");
+  return { name, rows: count.rows[0]?.n ?? 0 };
 }
 
 function harnessFor(database: TenantDatabase, table?: StatutoryTable) {

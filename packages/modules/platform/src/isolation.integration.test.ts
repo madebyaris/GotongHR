@@ -37,6 +37,8 @@ const deniedTables = [
   "ai_action_proposals",
   "ai_conversations",
   "ai_messages",
+  "hr_employee_pii",
+  "hr_employees",
   "hr_secret",
   "att_secret",
   "pay_run",

@@ -365,6 +365,22 @@ COMMENT ON COLUMN id_branches.geofence_lat IS 'Geofence latitude. API field lati
 COMMENT ON COLUMN id_branches.geofence_lng IS 'Geofence longitude. API field longitude.';
 COMMENT ON COLUMN id_branches.geofence_radius_m IS 'Geofence radius in meters. API field geofenceRadiusM.';
 COMMENT ON COLUMN id_branches.ump_umk_idr IS 'UMP or UMK floor in integer rupiah. API field umpUmkIdr, JSON string.';
+
+UPDATE id_roles AS roles
+SET permissions = (
+  SELECT ARRAY(
+    SELECT DISTINCT item
+    FROM unnest(roles.permissions || seed.atoms) AS item
+  )
+)
+FROM (VALUES
+  ('org_owner', ARRAY['employee.read', 'employee.write']::text[]),
+  ('hr_admin', ARRAY['employee.read', 'employee.write']::text[]),
+  ('payroll_admin', ARRAY['employee.read']::text[]),
+  ('it_security_admin', ARRAY['employee.read']::text[])
+) AS seed(code, atoms)
+WHERE roles.code = seed.code
+  AND NOT (roles.permissions @> seed.atoms);
 `;
 
 /**

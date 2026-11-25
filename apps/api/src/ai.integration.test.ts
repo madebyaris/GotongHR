@@ -166,6 +166,7 @@ describe("ai http", { concurrency: 1 }, () => {
   });
 
   it("redacts outbound text and confirms a proposal exactly once", async () => {
+    const employeesBefore = await employeeVaultState();
     const created = await ownerProposal(
       `NIK ${NIK}. NPWP ${NPWP}. plain ${NPWP_PLAIN}. rekening ${BANK}. ${PHONE} ${LOCAL} ${EMAIL}`,
     );
@@ -240,8 +241,7 @@ describe("ai http", { concurrency: 1 }, () => {
     assert.equal(again.statusCode, 409);
     assert.equal(executions.includes(rejected.id), false);
 
-    const employees = await statusQuery("SELECT to_regclass('hr_employees')::text AS status");
-    assert.equal(employees, null);
+    assert.deepEqual(await employeeVaultState(), employeesBefore);
     assertNoSamples(await persistedText());
   });
 
@@ -424,6 +424,13 @@ async function expire(id: string): Promise<void> {
 
 async function statusOf(id: string): Promise<string | null> {
   return statusQuery("SELECT status FROM ai_action_proposals WHERE id = $1", [id]);
+}
+
+async function employeeVaultState(): Promise<{ name: string | null; rows: number }> {
+  const name = await statusQuery("SELECT to_regclass('hr_employees')::text AS status");
+  if (!name) return { name: null, rows: 0 };
+  const rows = Number(await statusQuery("SELECT count(*)::text AS status FROM hr_employees"));
+  return { name, rows };
 }
 
 async function statusQuery(text: string, params: string[] = []): Promise<string | null> {

@@ -63,15 +63,20 @@ export const roleScopeDefaults: Record<RoleCode, RoleScopeDefault> = {
  * Seed copied into `id_roles` when a tenant is created. The request guard
  * checks that stored array. Changing this map does not update an existing
  * tenant, and `roleHasPermission` reads the seed, so it can disagree with a
- * row that was edited later.
+ * row that was edited later. Identity migrate appends `employee.read` and
+ * `employee.write` onto the built-in roles that have them here.
  *
  * `org_owner` may finalize a payroll run and may not prepare or create one.
  * `hr_admin` and `payroll_admin` prepare. The preparer is not the finalizer.
- * `branch_manager` does not receive `employee.pii.read` until branch row
- * scoping exists (Slice 2.x). This slice does not filter rows by scope.
+ * `branch_manager` does not receive `employee.read` until branch row
+ * scoping exists (Slice 2.x). Employee routes filter rows by scope when
+ * the arrays are non-empty. `self_only` and `direct_reports_only` stay off
+ * the directory until an employee is linked to a user.
  */
 export const rolePermissions = {
   org_owner: [
+    "employee.read",
+    "employee.write",
     "employee.pii.read",
     "employee.pii.reveal",
     "attendance.approve",
@@ -82,6 +87,8 @@ export const rolePermissions = {
     "tenant.support_grant.write",
   ],
   hr_admin: [
+    "employee.read",
+    "employee.write",
     "employee.pii.read",
     "employee.pii.reveal",
     "attendance.approve",
@@ -90,6 +97,7 @@ export const rolePermissions = {
     "ai.action.approve",
   ],
   payroll_admin: [
+    "employee.read",
     "employee.pii.read",
     "payroll.run.prepare",
     "payroll.run.create",
@@ -99,7 +107,12 @@ export const rolePermissions = {
   branch_manager: ["attendance.approve"],
   line_manager: ["attendance.approve"],
   employee: [],
-  it_security_admin: ["audit.log.read", "employee.pii.read", "tenant.support_grant.write"],
+  it_security_admin: [
+    "employee.read",
+    "audit.log.read",
+    "employee.pii.read",
+    "tenant.support_grant.write",
+  ],
 } as const satisfies Record<RoleCode, readonly PermissionAtom[]>;
 
 export function roleHasPermission(role: RoleCode, atom: PermissionAtom): boolean {
