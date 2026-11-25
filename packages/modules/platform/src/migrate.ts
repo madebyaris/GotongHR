@@ -1,5 +1,7 @@
-import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE } from "@gotonghr/db";
+import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE, tenantIsolationPolicySql } from "@gotonghr/db";
 import pg from "pg";
+import { tenantExportTableSql } from "./export-ddl.ts";
+import { platformTenantHealthSql } from "./health-sql.ts";
 import { sqlStringList, statutoryRuleTypes, statutoryStatuses } from "./schema.ts";
 
 const { Client } = pg;
@@ -13,6 +15,7 @@ const PROVISION =
   "sys_provision_tenant(text, text, text, text, text, text, jsonb, text)";
 const SET_STATUS = "sys_set_tenant_status(uuid, text)";
 const OPERATOR_EXISTS = "sys_platform_operator_exists(uuid)";
+const HEALTH = "platform_tenant_health()";
 
 /**
  * Platform tables and the two definer functions request handlers call.
@@ -26,10 +29,13 @@ export async function migratePlatform(input: PlatformMigrateInput): Promise<void
     await migrator.query("BEGIN");
     try {
       await migrator.query(tableSql);
+      await migrator.query(tenantExportTableSql);
+      await migrator.query(tenantIsolationPolicySql("tenant_exports"));
       await grantPlatformTables(migrator);
       await grantTenantMetadata(migrator);
       await grantSupportGrants(migrator);
       await grantStatutoryTables(migrator);
+      await grantTenantExports(migrator);
       await migrator.query("COMMIT");
     } catch (error) {
       await migrator.query("ROLLBACK");
@@ -55,6 +61,11 @@ export async function migratePlatform(input: PlatformMigrateInput): Promise<void
       await admin.query(`REVOKE ALL ON FUNCTION ${OPERATOR_EXISTS} FROM ${PLATFORM_ROLE}`);
       await admin.query(`REVOKE ALL ON FUNCTION ${OPERATOR_EXISTS} FROM ${QUEUE_ROLE}`);
       await admin.query(`GRANT EXECUTE ON FUNCTION ${OPERATOR_EXISTS} TO ${APP_ROLE}`);
+      await admin.query(platformTenantHealthSql);
+      await admin.query(`REVOKE ALL ON FUNCTION ${HEALTH} FROM PUBLIC`);
+      await admin.query(`REVOKE ALL ON FUNCTION ${HEALTH} FROM ${APP_ROLE}`);
+      await admin.query(`REVOKE ALL ON FUNCTION ${HEALTH} FROM ${QUEUE_ROLE}`);
+      await admin.query(`GRANT EXECUTE ON FUNCTION ${HEALTH} TO ${PLATFORM_ROLE}`);
       await admin.query("COMMIT");
     } catch (error) {
       await admin.query("ROLLBACK");
@@ -63,6 +74,13 @@ export async function migratePlatform(input: PlatformMigrateInput): Promise<void
   } finally {
     await admin.end();
   }
+}
+
+async function grantTenantExports(client: pg.Client): Promise<void> {
+  await client.query("REVOKE ALL ON TABLE tenant_exports FROM PUBLIC");
+  await client.query(`REVOKE ALL ON TABLE tenant_exports FROM ${PLATFORM_ROLE}`);
+  await client.query(`REVOKE ALL ON TABLE tenant_exports FROM ${QUEUE_ROLE}`);
+  await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE tenant_exports TO ${APP_ROLE}`);
 }
 
 async function grantPlatformTables(client: pg.Client): Promise<void> {

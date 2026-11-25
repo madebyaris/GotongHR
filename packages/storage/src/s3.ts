@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -5,6 +6,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { assertObjectKey, tokenExpiry } from "./keys.ts";
@@ -91,6 +93,37 @@ export function createS3Storage(options: S3StorageOptions): S3ObjectStorage {
           ContentType: input.contentType,
         }),
       );
+    },
+    async putStream(input) {
+      assertObjectKey(input.key);
+      if (input.contentType.trim().length === 0) {
+        throw new Error("Content type is required.");
+      }
+      let byteSize = 0;
+      const upload = new Upload({
+        client,
+        params: {
+          Bucket: options.bucket,
+          Key: input.key,
+          Body: Readable.from(
+            (async function* () {
+              for await (const chunk of input.body) {
+                const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                byteSize += bytes.byteLength;
+                yield bytes;
+              }
+            })(),
+          ),
+          ContentType: input.contentType,
+        },
+      });
+      try {
+        await upload.done();
+      } catch (error) {
+        await upload.abort().catch(() => undefined);
+        throw error;
+      }
+      return { byteSize };
     },
     async presignGet(input) {
       assertObjectKey(input.key);

@@ -10,6 +10,7 @@ import {
   sysPlatformOperators,
   sysSupportGrants,
   sysTenantQuotas,
+  tenantExports,
 } from "./schema.ts";
 
 test("platform tables use the sys_ names from the spec", () => {
@@ -19,6 +20,7 @@ test("platform tables use the sys_ names from the spec", () => {
   assert.equal(getTableName(sysPlatformAuditEvents), "sys_platform_audit_events");
   assert.equal(getTableName(sysPlatformOperators), "sys_platform_operators");
   assert.equal(getTableName(payStatutoryTables), "pay_statutory_tables");
+  assert.equal(getTableName(tenantExports), "tenant_exports");
 });
 
 test("statutory rule types keep the engine document and the spec codes", () => {

@@ -34,6 +34,15 @@ export interface ObjectStorage {
   presignGet(input: { key: string; expiresInSeconds?: number }): Promise<PresignedGet>;
   /** Writes bytes the server generated. Presign is for a browser upload. */
   put(input: { key: string; body: Uint8Array; contentType: string }): Promise<void>;
+  /**
+   * Writes a server-generated object without buffering the body.
+   * This path does not apply the 2 MB browser upload cap.
+   */
+  putStream(input: {
+    key: string;
+    body: AsyncIterable<Uint8Array>;
+    contentType: string;
+  }): Promise<{ byteSize: number }>;
   /** Byte stream for one object. Callers read it line by line and do not buffer the object. */
   openRead(input: { key: string }): Promise<AsyncIterable<Uint8Array | string>>;
   stat(input: { key: string }): Promise<ObjectStat | null>;

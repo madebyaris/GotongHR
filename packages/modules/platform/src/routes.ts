@@ -19,6 +19,7 @@ import {
   type StatutoryPublishVerifier,
 } from "./statutory.ts";
 import { hashToken, randomToken, signInvite } from "./tokens.ts";
+import { registerTenantExportRoutes } from "./export-routes.ts";
 import {
   listAuditEvents,
   listTenantHealth,
@@ -71,6 +72,10 @@ export interface PlatformDeps {
   hashOwnerPassword(password: string): Promise<string>;
   readPlatformActor(request: FastifyRequest): Promise<PlatformActorResult>;
   readTenantAdmin(request: FastifyRequest): Promise<TenantAdminResult>;
+  /** Owner only. Support-grant admins are not enough. */
+  readTenantOwner(request: FastifyRequest): Promise<TenantAdminResult>;
+  enqueueTenantExport(message: { tenantId: string; exportId: string }): Promise<void>;
+  presignExportDownload(input: { key: string; expiresInSeconds: number }): Promise<{ url: string }>;
   verifyStatutoryPayload: StatutoryPublishVerifier;
 }
 
@@ -158,11 +163,12 @@ const tenantListQuery = z.object({
 });
 
 /**
- * Platform routes and tenant support-grant routes mount together.
- * `single_tenant` leaves both unmounted.
+ * Tenant export routes mount in every deployment mode.
+ * Platform routes and support-grant routes mount when `mountPlatformRoutes` is true.
  * Grant actions append tenant `aud_events` through `tenantAudit`.
  */
 export async function registerPlatform(app: FastifyInstance, deps: PlatformDeps): Promise<void> {
+  await registerTenantExportRoutes(app, deps);
   if (!deps.mountPlatformRoutes) return;
 
   app.post("/api/v1/tenant/support-grants", async (request, reply) => {

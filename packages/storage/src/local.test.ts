@@ -260,6 +260,62 @@ describe("local object storage", () => {
     assert.equal(await readFile(path.join(root, "tenant/api.txt"), "utf8"), "api");
     await app.close();
   });
+
+  it("streams a multi-chunk object, including one larger than the browser cap", async () => {
+    const storage = createLocalStorage({ rootDir: root, secret: "test-secret", urlPrefix: "" });
+    async function* hello() {
+      yield Buffer.from("hel");
+      yield Buffer.from("lo");
+    }
+    const small = await storage.putStream({
+      key: "tenant/stream.txt",
+      body: hello(),
+      contentType: "text/plain",
+    });
+    assert.equal(small.byteSize, 5);
+    assert.equal(await readFile(path.join(root, "tenant/stream.txt"), "utf8"), "hello");
+    let streamed = "";
+    for await (const chunk of await storage.openRead({ key: "tenant/stream.txt" })) {
+      streamed += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    }
+    assert.equal(streamed, "hello");
+
+    async function* big() {
+      yield Buffer.alloc(MAX_UPLOAD_BYTES, 1);
+      yield Buffer.from([2]);
+    }
+    const large = await storage.putStream({
+      key: "tenant/stream-big.bin",
+      body: big(),
+      contentType: "application/octet-stream",
+    });
+    assert.equal(large.byteSize, MAX_UPLOAD_BYTES + 1);
+    assert.equal((await stat(path.join(root, "tenant/stream-big.bin"))).size, MAX_UPLOAD_BYTES + 1);
+
+    async function* broken() {
+      yield Buffer.from("partial");
+      throw new Error("stream broke");
+    }
+    await assert.rejects(
+      storage.putStream({
+        key: "tenant/broken.bin",
+        body: broken(),
+        contentType: "application/octet-stream",
+      }),
+      /stream broke/,
+    );
+    assert.equal(await storage.stat({ key: "tenant/broken.bin" }), null);
+    await assert.rejects(
+      storage.putStream({
+        key: "tenant/empty-type.bin",
+        body: (async function* () {
+          yield Buffer.from("x");
+        })(),
+        contentType: "  ",
+      }),
+      /Content type/,
+    );
+  });
 });
 
 function signedToken(payload: unknown, secret: string): string {

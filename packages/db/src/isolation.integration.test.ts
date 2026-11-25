@@ -64,6 +64,7 @@ const requiredTenantTables = [
   "pay_runs",
   "rls_probe",
   "sys_support_grants",
+  "tenant_exports",
 ] as const;
 
 const platformDeniedTables = [
@@ -96,6 +97,7 @@ const platformDeniedTables = [
   "pay_run",
   "pay_run_items",
   "pay_runs",
+  "tenant_exports",
   "id_memberships",
   "id_legal_entities",
   "id_branches",
@@ -296,6 +298,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
       "pay_run_items",
       "pay_runs",
       "pay_run",
+      "tenant_exports",
       "rls_probe",
       "id_sessions",
       "id_memberships",
@@ -367,6 +370,7 @@ describe("tenant isolation", { concurrency: 1 }, () => {
     await assertPermissionDenied(platform, "SELECT id FROM pay_runs");
     await assertPermissionDenied(platform, "SELECT id FROM pay_run_items");
     await assertPermissionDenied(platform, "SELECT id FROM pay_exports");
+    await assertPermissionDenied(platform, "SELECT id FROM tenant_exports");
   });
 
   it("rejects UPDATE, DELETE, and TRUNCATE on append-only audit tables", async () => {
@@ -497,6 +501,43 @@ describe("tenant isolation", { concurrency: 1 }, () => {
         ),
       (error: unknown) => permissionCode(error) === "42501",
     );
+  });
+
+  it("platform health counters omit employee PII and payroll line items", async () => {
+    if (!platform || !seed) throw new Error("isolation setup did not open the database");
+    const seeded = seed;
+    const definition = await platform.query<{ def: string }>(
+      "SELECT pg_get_functiondef('platform_tenant_health()'::regprocedure) AS def",
+    );
+    const source = definition.rows[0]?.def ?? "";
+    assert.equal(source.includes("hr_employee_pii"), false);
+    assert.equal(source.includes("pay_run_items"), false);
+    const listed = await platform.query<{ body: string }>(
+      `SELECT coalesce(json_agg(row_to_json(h)), '[]'::json)::text AS body
+       FROM platform_tenant_health() h`,
+    );
+    const body = listed.rows[0]?.body ?? "[]";
+    const rows = JSON.parse(body) as Array<{
+      tenant_id: string;
+      active_users: number | string;
+      clock_in_count: number | string;
+      queue_depth: number | string;
+      storage_bytes: number | string;
+    }>;
+    const row = rows.find((item) => item.tenant_id === seeded.tenantA);
+    assert.ok(row);
+    assert.equal(Number(row.active_users), 1);
+    assert.equal(Number(row.clock_in_count), 1);
+    assert.equal(Number(row.queue_depth), 0);
+    assert.equal(Number(row.storage_bytes), 1212);
+    assert.equal(body.includes("3273011508950001"), false);
+    assert.equal(body.includes("3273011508950002"), false);
+    assert.equal(body.includes("Employee A"), false);
+    assert.equal(body.includes("Employee B"), false);
+    assert.equal(body.includes("@isolation.test"), false);
+    assert.equal(body.includes("1000000000000001"), false);
+    assert.equal(body.includes("1000000000000002"), false);
+    assert.equal(/\d{16}/.test(body), false);
   });
 });
 
@@ -703,6 +744,8 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
   const payItemB = randomUUID();
   const payExportA = randomUUID();
   const payExportB = randomUUID();
+  const exportA = randomUUID();
+  const exportB = randomUUID();
   const employeeA = randomUUID();
   const employeeB = randomUUID();
   const employeePiiA = randomUUID();
@@ -908,8 +951,8 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
     );
     await superuser.query(
       `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask) VALUES
-         ($1, $3, $5, 'sealed-ciphertext-value-aaaa', $7, '3273********0001'),
-         ($2, $4, $6, 'sealed-ciphertext-value-bbbb', $8, '3273********0001')`,
+         ($1, $3, $5, 'sealed-3273011508950001-aaaa', $7, '3273********0001'),
+         ($2, $4, $6, 'sealed-3273011508950002-bbbb', $8, '3273********0001')`,
       [
         employeePiiA,
         employeePiiB,
@@ -1030,8 +1073,8 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
          employee_snapshot_json, attendance_snapshot_json, earnings_json, deductions_json,
          bpjs_json, pph21_json, gross_idr, tax_idr, net_idr
        ) VALUES
-         ($1, $3, $5, $7, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0),
-         ($2, $4, $6, $8, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0)`,
+         ($1, $3, $5, $7, '{"nik":"3273011508950001","fullName":"Employee A"}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0),
+         ($2, $4, $6, $8, '{"nik":"3273011508950002","fullName":"Employee B"}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0)`,
       [payItemA, payItemB, tenantA, tenantB, payRunA, payRunB, employeeA, employeeB],
     );
     await superuser.query(
@@ -1052,6 +1095,12 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
         "ab".repeat(32),
         "cd".repeat(32),
       ],
+    );
+    await superuser.query(
+      `INSERT INTO tenant_exports (id, tenant_id, requested_by, status) VALUES
+         ($1, $3, $5, 'queued'),
+         ($2, $4, $6, 'queued')`,
+      [exportA, exportB, tenantA, tenantB, userA, userB],
     );
     await superuser.query(
       `INSERT INTO ai_conversations (id, tenant_id, created_by_user_id, title) VALUES
@@ -1221,12 +1270,14 @@ async function insertSeed(superuser: pg.Client): Promise<Seed> {
       ["pay_runs", { a: payRunA, b: payRunB }],
       ["rls_probe", { a: probeA, b: probeB }],
       ["sys_support_grants", { a: grantA, b: grantB }],
+      ["tenant_exports", { a: exportA, b: exportB }],
     ]),
   };
 }
 
 async function deleteSeed(superuser: pg.Client, seed: Seed): Promise<void> {
   const tenants = [seed.tenantA, seed.tenantB];
+  await superuser.query("DELETE FROM tenant_exports WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM pay_exports WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM pay_run_items WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM pay_runs WHERE tenant_id = ANY($1::uuid[])", [tenants]);

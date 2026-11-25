@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, it } from "node:test";
-import { createSupportGrantAuditPort, provisionTenantKeys, verifyTenantHashChain } from "@gotonghr/audit";
+import { createSupportGrantAuditPort, provisionTenantKeys, readTenantSecrets, verifyTenantHashChain } from "@gotonghr/audit";
 import { asCiphertext, revealPii } from "@gotonghr/audit/reveal";
-import { encryptField, loadKek, unwrapDek } from "@gotonghr/crypto";
+import { blindIndex, encryptField, loadKek, maskNik, unwrapDek } from "@gotonghr/crypto";
+import Fastify from "fastify";
 import {
   APP_ROLE,
   PLATFORM_ROLE,
@@ -24,6 +25,7 @@ import {
   withSupportSession,
 } from "./grants.ts";
 import { applyTenantSchema } from "./isolation-schema.ts";
+import { registerPlatform } from "./routes.ts";
 import { registerPlatformOperator } from "./tenants.ts";
 
 const { Client } = pg;
@@ -62,6 +64,7 @@ const deniedTables = [
   "pay_run",
   "pay_run_items",
   "pay_runs",
+  "tenant_exports",
   "id_memberships",
   "id_legal_entities",
   "id_branches",
@@ -286,6 +289,187 @@ describe("support grant isolation", { concurrency: 1 }, () => {
     assert.equal(chain.ok, true);
     if (chain.ok) assert.equal(chain.chained, true);
   });
+
+  it("GET /api/v1/platform/health/tenants returns counters and no NIK", async () => {
+    if (!app || !platformDb || !superuser) throw new Error("isolation setup did not open the database");
+    const database = app;
+    const admin = superuser;
+    const healthName = "Sari Wulandari";
+    const healthEmail = `sari-${tenantA}@health.test`;
+    const healthNpwp = "1000000000000099";
+    const secrets = await database.withTenantContext(tenantA, (tx) => readTenantSecrets(tx, tenantA));
+    const ciphertext = encryptField(secrets.dek, tenantA, "nik", nik);
+    const userId = randomUUID();
+    const roleId = randomUUID();
+    const membershipId = randomUUID();
+    const entityId = randomUUID();
+    const branchId = randomUUID();
+    const employeeId = randomUUID();
+    const piiId = randomUUID();
+    const clockId = randomUUID();
+    const documentId = randomUUID();
+    const runId = randomUUID();
+    const itemId = randomUUID();
+    const exportId = randomUUID();
+    await admin.query("BEGIN");
+    try {
+      await admin.query(
+        `INSERT INTO id_roles (id, tenant_id, code, permissions)
+         VALUES ($1, $2, 'org_owner', ARRAY['employee.pii.reveal']::text[])`,
+        [roleId, tenantA],
+      );
+      await admin.query(
+        `INSERT INTO id_users (id, tenant_id, auth_user_id, email, display_name)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [userId, tenantA, `health-${tenantA}`, healthEmail, healthName],
+      );
+      await admin.query(
+        `INSERT INTO id_memberships (id, tenant_id, user_id, auth_user_id, role_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [membershipId, tenantA, userId, `health-${tenantA}`, roleId],
+      );
+      await admin.query(
+        `INSERT INTO id_legal_entities (id, tenant_id, company_name, npwp_16)
+         VALUES ($1, $2, 'PT Health', $3)`,
+        [entityId, tenantA, healthNpwp],
+      );
+      await admin.query(
+        `INSERT INTO id_branches (id, tenant_id, legal_entity_id, name, nitku_22, timezone, ump_umk_idr)
+         VALUES ($1, $2, $3, 'HQ', '2200000000000000000099', 'Asia/Jakarta', 5000000)`,
+        [branchId, tenantA, entityId],
+      );
+      await admin.query(
+        `INSERT INTO hr_employees (
+           id, tenant_id, employee_code, full_name, legal_entity_id, branch_id,
+           employment_status, join_date, ptkp_status, tax_method, pph21_subject_type, date_of_birth
+         ) VALUES (
+           $1, $2, 'H001', $3, $4, $5, 'active', '2024-01-15', 'TK/0', 'gross', 'permanent', '1990-04-02'
+         )`,
+        [employeeId, tenantA, healthName, entityId, branchId],
+      );
+      await admin.query(
+        `INSERT INTO hr_employee_pii (id, tenant_id, employee_id, nik_enc, nik_hash, nik_mask)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [piiId, tenantA, employeeId, ciphertext, blindIndex(secrets.pepper, nik), maskNik(nik)],
+      );
+      await admin.query(
+        `INSERT INTO att_clock_events (
+           id, tenant_id, employee_id, branch_id, idempotency_key,
+           punch_type, captured_at, received_at, clock_drift_seconds,
+           sync_source, lat, lng, geofence_ok, review_status
+         ) VALUES (
+           $1, $2, $3, $4, $5, 'clock_in', now(), now(), 0, 'online', -6.2, 106.8, true, 'ok'
+         )`,
+        [clockId, tenantA, employeeId, branchId, randomUUID()],
+      );
+      await admin.query(
+        `INSERT INTO hr_documents (
+           id, tenant_id, employee_id, doc_type, file_name, storage_key, content_type, byte_size, uploaded_by
+         ) VALUES (
+           $1, $2, $3, 'ktp', 'ktp-health.pdf', $4, 'application/pdf', 4096, $5
+         )`,
+        [documentId, tenantA, employeeId, `t/${tenantA}/emp/${employeeId}/doc/${documentId}/ktp-health.pdf`, userId],
+      );
+      await admin.query(
+        `INSERT INTO pay_runs (id, tenant_id, legal_entity_id, period_year_month)
+         VALUES ($1, $2, $3, '2026-03')`,
+        [runId, tenantA, entityId],
+      );
+      await admin.query(
+        `INSERT INTO pay_run_items (
+           id, tenant_id, run_id, employee_id,
+           employee_snapshot_json, attendance_snapshot_json, earnings_json, deductions_json,
+           bpjs_json, pph21_json, gross_idr, tax_idr, net_idr
+         ) VALUES (
+           $1, $2, $3, $4,
+           $5::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 0, 0, 0
+         )`,
+        [
+          itemId,
+          tenantA,
+          runId,
+          employeeId,
+          JSON.stringify({ nik, fullName: healthName }),
+        ],
+      );
+      await admin.query(
+        `INSERT INTO pay_exports (id, tenant_id, run_id, export_kind, storage_key, checksum_sha256, byte_size)
+         VALUES ($1, $2, $3, 'coretax', $4, $5, 128)`,
+        [exportId, tenantA, runId, `exports/${tenantA}/${runId}/coretax-${exportId}.xml`, "ab".repeat(32)],
+      );
+      await admin.query("COMMIT");
+    } catch (error) {
+      await admin.query("ROLLBACK");
+      throw error;
+    }
+
+    const http = Fastify({ logger: false });
+    try {
+      await registerPlatform(http, {
+        platform: platformDb,
+        app: database,
+        tenantAudit: createSupportGrantAuditPort(database),
+        mountPlatformRoutes: true,
+        inviteSecret: "isolation-invite-secret-0123456789",
+        hashOwnerPassword: async () => "unused",
+        readPlatformActor: async () => ({
+          kind: "ok",
+          actor: { id: operatorId, role: "platform_ops", ip: null },
+        }),
+        readTenantAdmin: async () => ({
+          kind: "denied",
+          status: 401,
+          code: "unauthenticated",
+          message: "Sign in required.",
+        }),
+        readTenantOwner: async () => ({
+          kind: "denied",
+          status: 401,
+          code: "unauthenticated",
+          message: "Sign in required.",
+        }),
+        enqueueTenantExport: async () => undefined,
+        presignExportDownload: async () => ({ url: "/unused" }),
+        verifyStatutoryPayload: () => ({
+          ok: true,
+          ruleType: "pph21",
+          effectiveFrom: "2026-01-01",
+          effectiveTo: "2026-12-31",
+        }),
+      });
+      const response = await http.inject({ method: "GET", url: "/api/v1/platform/health/tenants" });
+      assert.equal(response.statusCode, 200, response.body);
+      const parsed = JSON.parse(response.body) as {
+        data: Array<{
+          tenantId: string;
+          activeUsers: number;
+          peakClockIns: number;
+          queueDepth: number;
+          storageBytes: number;
+          webhookFailureRate: null;
+        }>;
+      };
+      const row = parsed.data.find((item) => item.tenantId === tenantA);
+      assert.ok(row);
+      assert.equal(row.activeUsers, 1);
+      assert.equal(row.peakClockIns, 1);
+      assert.equal(row.queueDepth, 0);
+      assert.equal(row.storageBytes, 4224);
+      assert.equal(row.webhookFailureRate, null);
+      assert.equal(response.body.includes(nik), false);
+      assert.equal(response.body.includes(ciphertext), false);
+      assert.equal(response.body.includes(healthName), false);
+      assert.equal(response.body.includes(healthEmail), false);
+      assert.equal(response.body.includes(healthNpwp), false);
+      assert.equal(response.body.includes(maskNik(nik)), false);
+      assert.equal(/\d{16}/.test(response.body), false);
+    } finally {
+      await http.close();
+      await admin.query("DELETE FROM pay_exports WHERE tenant_id = $1::uuid", [tenantA]);
+      await admin.query("DELETE FROM pay_run_items WHERE tenant_id = $1::uuid", [tenantA]);
+      await admin.query("DELETE FROM pay_runs WHERE tenant_id = $1::uuid", [tenantA]);
+    }
+  });
 });
 
 function restoreEnv(name: "GOTONG_PII_KEK" | "AUDIT_HASH_CHAIN", value: string | undefined): void {
@@ -443,6 +627,10 @@ async function deleteTenants(
   ids: { tenantA: string; tenantB: string; orgA: string; orgB: string; operatorId: string },
 ): Promise<void> {
   const tenants = [ids.tenantA, ids.tenantB];
+  await superuser.query("DELETE FROM pay_exports WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM pay_run_items WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM pay_runs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
+  await superuser.query("DELETE FROM tenant_exports WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_pii_access_logs WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);
   await superuser.query("DELETE FROM aud_outbox_events WHERE tenant_id = ANY($1::uuid[])", [tenants]);

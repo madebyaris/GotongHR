@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build",
-    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/env.test.ts src/schema.test.ts src/tokens.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/env.test.ts src/schema.test.ts src/tokens.test.ts src/health-sql.test.ts src/export-zip.test.ts"
   },
   "dependencies": {
     "@gotonghr/contracts": "workspace:*",

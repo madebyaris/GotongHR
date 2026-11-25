@@ -50,6 +50,8 @@ import { buildServer } from "./server.ts";
 import { MAINTENANCE_QUEUE, startBoss } from "./queue.ts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { sendEmployeeImport, startEmployeeImportWorker } from "./employee-import.ts";
+import { createTenantExportRead } from "./tenant-export-adapters.ts";
+import { sendTenantExport, startTenantExportWorker } from "./tenant-export.ts";
 import { createPayrollAdapters } from "./payroll-adapters.ts";
 import { createPgBossPayrollQueue, startPayrollWorkers } from "./payroll-queue.ts";
 
@@ -110,6 +112,11 @@ export async function composeFromEnv(
         storage.presignGet({ key: input.key, expiresInSeconds: input.expiresInSeconds }),
     };
     await startPayrollWorkers(runningBoss, { appDb, storage: payrollStorage });
+    await startTenantExportWorker(runningBoss, {
+      appDb,
+      read: createTenantExportRead({ appDb, storage }),
+      storage,
+    });
     const payrollAdapters = createPayrollAdapters(appDb);
     const payrollQueue = createPgBossPayrollQueue(runningBoss);
     const guard = (permission: PermissionAtom) => requirePermission(permission);
@@ -249,6 +256,15 @@ export async function composeFromEnv(
       hashOwnerPassword: hashPassword,
       readPlatformActor: readers.readPlatformActor,
       readTenantAdmin: readers.readTenantAdmin,
+      readTenantOwner: readers.readTenantOwner,
+      enqueueTenantExport: (message) => sendTenantExport(runningBoss, message),
+      presignExportDownload: async (input) => {
+        const signed = await storage.presignGet({
+          key: input.key,
+          expiresInSeconds: input.expiresInSeconds,
+        });
+        return { url: signed.url };
+      },
       verifyStatutoryPayload,
     });
     const runningApp = app;

@@ -15,6 +15,7 @@ export async function applyTenantSchema(env: NodeJS.ProcessEnv = process.env): P
     superuserUrl: migrateEnv.superuserUrl,
     migratorUrl: migrateEnv.migratorUrl,
   });
+  // migratePlatform creates tenant_exports with FORCE RLS and platform_tenant_health().
   await migratePlatform({
     superuserUrl: migrateEnv.superuserUrl,
     migratorUrl: migrateEnv.migratorUrl,

@@ -5,6 +5,7 @@ import type { FastifyRequest } from "fastify";
 export function platformReaders(input: { auth: GotongAuth; platform: PlatformDatabase }): {
   readPlatformActor(request: FastifyRequest): Promise<PlatformActorResult>;
   readTenantAdmin(request: FastifyRequest): Promise<TenantAdminResult>;
+  readTenantOwner(request: FastifyRequest): Promise<TenantAdminResult>;
 } {
   return {
     async readPlatformActor(request) {
@@ -23,32 +24,39 @@ export function platformReaders(input: { auth: GotongAuth; platform: PlatformDat
       const role = row.role === "platform_super_admin" ? "platform_super_admin" : "platform_ops";
       return { kind: "ok", actor: { id: row.id, role, ip: request.ip || null } };
     },
-    async readTenantAdmin(request) {
-      const result = await authenticateRequest(request, {
-        permission: "tenant.support_grant.write",
-      });
-      if (!result.ok) {
-        const denied: TenantAdminResult = {
-          kind: "denied",
-          status: result.status,
-          code: result.code,
-          message: result.message,
-        };
-        if (result.meta) denied.meta = result.meta;
-        return denied;
-      }
-      if (result.context.role !== "org_owner" && result.context.role !== "it_security_admin") {
-        return { kind: "denied", status: 403, code: "forbidden", message: "Missing permission." };
-      }
-      return {
-        kind: "ok",
-        admin: {
-          tenantId: result.context.tenantId,
-          userId: result.context.userId,
-          role: result.context.role,
-          ip: request.ip || null,
-        },
-      };
+    readTenantAdmin: (request) =>
+      readPrivilegedTenant(request, (role) => role === "org_owner" || role === "it_security_admin"),
+    readTenantOwner: (request) => readPrivilegedTenant(request, (role) => role === "org_owner"),
+  };
+}
+
+async function readPrivilegedTenant(
+  request: FastifyRequest,
+  accept: (role: string) => boolean,
+): Promise<TenantAdminResult> {
+  const result = await authenticateRequest(request, {
+    permission: "tenant.support_grant.write",
+  });
+  if (!result.ok) {
+    const denied: TenantAdminResult = {
+      kind: "denied",
+      status: result.status,
+      code: result.code,
+      message: result.message,
+    };
+    if (result.meta) denied.meta = result.meta;
+    return denied;
+  }
+  if (!accept(result.context.role)) {
+    return { kind: "denied", status: 403, code: "forbidden", message: "Missing permission." };
+  }
+  return {
+    kind: "ok",
+    admin: {
+      tenantId: result.context.tenantId,
+      userId: result.context.userId,
+      role: result.context.role,
+      ip: request.ip || null,
     },
   };
 }
