@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   integer,
   index,
   jsonb,
@@ -128,6 +129,88 @@ export const sysSupportGrants = pgTable(
       .on(table.sessionTokenHash)
       .where(sql`${table.sessionTokenHash} is not null`),
     index("sys_support_grants_tenant_id_idx").on(table.tenantId),
+  ],
+);
+
+export const statutoryStatuses = ["draft", "published", "archived"] as const;
+export type StatutoryStatus = (typeof statutoryStatuses)[number];
+
+/**
+ * `pph21` is the payroll-engine document: TER, PTKP, Pasal 17, and the JP cap.
+ * The other codes are the spec's single-rule names. Publish verifies `pph21` only.
+ */
+export const statutoryRuleTypes = [
+  "pph21",
+  "ter_a",
+  "ter_b",
+  "ter_c",
+  "pasal17",
+  "bpjs_caps",
+  "ptkp",
+] as const;
+export type StatutoryRuleType = (typeof statutoryRuleTypes)[number];
+
+/** Quotes a fixed identifier list for a SQL `IN` clause. Values are not user input. */
+export function sqlStringList(values: readonly string[]): string {
+  return values
+    .map((value) => {
+      if (!/^[a-z0-9_]+$/u.test(value)) throw new Error(`Unsafe SQL literal: ${value}`);
+      return `'${value}'`;
+    })
+    .join(", ");
+}
+
+export const payStatutoryTables = pgTable(
+  "pay_statutory_tables",
+  {
+    id: uuid("id").primaryKey().default(sql`uuidv7()`),
+    ruleType: text("rule_type").notNull(),
+    versionLabel: text("version_label").notNull(),
+    effectiveFrom: date("effective_from", { mode: "string" }).notNull(),
+    effectiveTo: date("effective_to", { mode: "string" }),
+    status: text("status").notNull().default("draft"),
+    payloadJson: jsonb("payload_json").$type<Record<string, unknown>>().notNull(),
+    createdByOperatorId: uuid("created_by_operator_id")
+      .notNull()
+      .references(() => sysPlatformOperators.id),
+    publishedByOperatorId: uuid("published_by_operator_id").references(
+      () => sysPlatformOperators.id,
+    ),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("pay_statutory_tables_lookup_idx")
+      .on(table.ruleType, table.effectiveFrom)
+      .where(sql`${table.status} = 'published'`),
+    check(
+      "pay_statutory_tables_status_check",
+      sql`${table.status} in (${sql.raw(sqlStringList(statutoryStatuses))})`,
+    ),
+    check(
+      "pay_statutory_tables_rule_type_check",
+      sql`${table.ruleType} in (${sql.raw(sqlStringList(statutoryRuleTypes))})`,
+    ),
+    check(
+      "pay_statutory_tables_effective_order",
+      sql`${table.effectiveTo} is null or ${table.effectiveTo} >= ${table.effectiveFrom}`,
+    ),
+    check(
+      "pay_statutory_tables_version_label_check",
+      sql`length(trim(${table.versionLabel})) between 1 and 80`,
+    ),
+    check(
+      "pay_statutory_tables_publish_meta_check",
+      sql`(
+        (${table.status} = 'published'
+          and ${table.publishedAt} is not null
+          and ${table.publishedByOperatorId} is not null)
+        or (${table.status} in ('draft', 'archived')
+          and ${table.publishedAt} is null
+          and ${table.publishedByOperatorId} is null)
+      )`,
+    ),
   ],
 );
 
