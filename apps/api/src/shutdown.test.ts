@@ -4,18 +4,18 @@ import { runShutdown } from "./shutdown.ts";
 
 function capture() {
   const writes: string[] = [];
-  let code: number | undefined;
+  const codes: number[] = [];
   return {
     writes,
+    codes,
     io: {
       exit(value: number) {
-        code = value;
+        codes.push(value);
       },
       write(line: string) {
         writes.push(line);
       },
     },
-    code: () => code,
   };
 }
 
@@ -24,7 +24,7 @@ describe("shutdown", { concurrency: 1 }, () => {
     const seen = capture();
     runShutdown(async () => {}, seen.io);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(seen.code(), 0);
+    assert.deepEqual(seen.codes, [0]);
     assert.match(seen.writes.join(""), /shutdown started/);
   });
 
@@ -34,7 +34,7 @@ describe("shutdown", { concurrency: 1 }, () => {
       throw new Error("pool");
     }, seen.io);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(seen.code(), 1);
+    assert.deepEqual(seen.codes, [1]);
     assert.match(seen.writes.join(""), /pool/);
   });
 
@@ -42,7 +42,20 @@ describe("shutdown", { concurrency: 1 }, () => {
     const seen = capture();
     runShutdown(() => new Promise(() => {}), seen.io, 20);
     await new Promise((resolve) => setTimeout(resolve, 50));
-    assert.equal(seen.code(), 1);
+    assert.deepEqual(seen.codes, [1]);
     assert.match(seen.writes.join(""), /shutdown stalled/);
+  });
+
+  it("exits once when close finishes after the deadline", async () => {
+    const seen = capture();
+    let finish = (): void => {};
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    runShutdown(() => pending, seen.io, 20);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    finish();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(seen.codes, [1]);
   });
 });

@@ -68,8 +68,16 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
             failures.push(error);
           }
         }
-        const first = failures[0];
-        if (first) throw first;
+        if (failures.length === 0) return;
+        const errors = failures.map((failure) =>
+          failure instanceof Error ? failure : new Error(String(failure)),
+        );
+        for (const error of errors) {
+          process.stderr.write(
+            `${JSON.stringify({ msg: "shutdown step failed", error: error.message })}\n`,
+          );
+        }
+        throw new AggregateError(errors, "shutdown failed");
       })();
       return closing;
     },

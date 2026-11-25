@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, it, mock } from "node:test";
@@ -165,21 +165,65 @@ describe("local object storage", () => {
     await app.close();
   });
 
-  it("removes leftover partial uploads when routes register", async () => {
+  it("removes staged partials and leaves object keys alone", async () => {
     const directory = path.join(root, "tenant");
+    const staging = path.join(root, ".upload-partials");
     await mkdir(directory, { recursive: true });
+    await mkdir(staging, { recursive: true });
     const kept = path.join(directory, "kept.txt");
-    const partial = path.join(directory, "kept.txt.abcdabcdabcdabcd.partial");
+    const keyShaped = path.join(directory, "kept.txt.abcdabcdabcdabcdabcdabcdabcdabcd.partial");
     const namedPartial = path.join(directory, "notes.partial");
+    const staged = path.join(staging, `${"ab".repeat(16)}.partial`);
     await writeFile(kept, "kept");
-    await writeFile(partial, "orphan");
+    await writeFile(keyShaped, "user-data");
     await writeFile(namedPartial, "keep-me");
+    await writeFile(staged, "orphan");
     const storage = createLocalStorage({ rootDir: root, secret: "test-secret", urlPrefix: "" });
     const app = Fastify({ logger: false });
     await storage.registerRoutes(app);
-    await assert.rejects(stat(partial));
+    await assert.rejects(stat(staged));
     assert.equal(await readFile(kept, "utf8"), "kept");
+    assert.equal(await readFile(keyShaped, "utf8"), "user-data");
     assert.equal(await readFile(namedPartial, "utf8"), "keep-me");
+    await app.close();
+  });
+
+  it("refuses to upload through a symlinked staging directory", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "gotong-staging-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "gotong-outside-"));
+    try {
+      await symlink(outside, path.join(directory, ".upload-partials"));
+      const storage = createLocalStorage({ rootDir: directory, secret: "test-secret", urlPrefix: "" });
+      const app = Fastify({ logger: false });
+      await storage.registerRoutes(app);
+      const signed = await storage.presignPut({
+        key: "tenant/linked.txt",
+        contentType: "text/plain",
+        maxBytes: 20,
+      });
+      const put = await app.inject({
+        method: "PUT",
+        url: signed.url,
+        payload: Buffer.from("secret-bytes"),
+      });
+      assert.equal(put.statusCode, 500);
+      await assert.rejects(stat(path.join(directory, "tenant/linked.txt")));
+      assert.deepEqual(await readdir(outside), []);
+      await app.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("registers routes when the partial sweep cannot read staging", async () => {
+    const blocked = path.join(root, "not-a-directory");
+    await writeFile(blocked, "x");
+    const storage = createLocalStorage({ rootDir: blocked, secret: "test-secret", urlPrefix: "" });
+    const app = Fastify({ logger: false });
+    await storage.registerRoutes(app);
+    const health = await app.inject({ method: "GET", url: "/storage/local/objects" });
+    assert.equal(health.statusCode, 403);
     await app.close();
   });
 });
