@@ -39,13 +39,16 @@ function walk(manifest, key, files, seen) {
   for (const child of item.imports ?? []) walk(manifest, child, files, seen);
 }
 
+function routeKeyFor(manifest, routeHint) {
+  const keys = Object.keys(manifest).filter((key) => key.includes(routeHint));
+  const index = keys.find((key) => key.includes(`${routeHint}/index`));
+  return index ?? keys[0];
+}
+
 function shellBytes(manifest, routeHint) {
   const entry = Object.keys(manifest).find((key) => manifest[key]?.isEntry);
   if (!entry) throw new Error("Manifest has no entry.");
-  const keys = Object.keys(manifest);
-  const routeKey =
-    keys.find((key) => key.includes(`${routeHint}/index`)) ??
-    keys.find((key) => key.includes(routeHint));
+  const routeKey = routeKeyFor(manifest, routeHint);
   if (!routeKey) throw new Error(`Manifest has no ${routeHint} chunk.`);
   const files = new Set();
   walk(manifest, entry, files, new Set());

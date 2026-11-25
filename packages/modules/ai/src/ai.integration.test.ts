@@ -281,6 +281,134 @@ describe("ai assistant", { concurrency: 1 }, () => {
     assert.equal(JSON.stringify(offered).includes(SALARY), false);
     assert.equal((await storedText(app, tenantA)).includes(SALARY), false);
   });
+
+  it("streams redacted tokens and stops when the client disconnects", async () => {
+    const harness = harnessFor(app);
+    let streams = 0;
+    const original = harness.provider.stream.bind(harness.provider);
+    harness.provider.stream = (request, signal) => {
+      streams += 1;
+      return original(request, signal);
+    };
+    const events = [];
+    for await (const event of harness.runtime.chatStream(
+      hrCaller(tenantA, userA, false),
+      {
+        message: `NIK ${NIK}. Update the card.`,
+        script: [
+          {
+            text: `Ready ${NIK}`,
+            toolCalls: [
+              {
+                name: "propose_employee_change",
+                arguments: { employeeId, field: "display_name", value: "Sari" },
+              },
+            ],
+          },
+        ],
+      },
+      meta,
+    )) {
+      events.push(event);
+    }
+    assert.equal(streams > 0, true);
+    assert.equal(events.some((event) => event.type === "token"), true);
+    assert.equal(events.some((event) => event.type === "tool"), true);
+    assert.equal(events.some((event) => event.type === "proposal"), true);
+    assert.equal(events.at(-1)?.type, "done");
+    assertNoSamples(JSON.stringify(events));
+    const proposal = events.find((event) => event.type === "proposal");
+    assert.equal(proposal?.type, "proposal");
+    if (proposal?.type !== "proposal") return;
+    assert.equal(typeof proposal.proposal.confirmationNonce, "string");
+    assert.equal(JSON.stringify(proposal.proposal.impactPreview).includes(NIK), false);
+
+    const controller = new AbortController();
+    let released = false;
+    harness.provider.stream = async function* stream() {
+      yield { type: "text" as const, text: `${"a".repeat(80)} ` };
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1_000);
+        controller.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      released = true;
+      yield { type: "text" as const, text: NIK };
+      yield { type: "done" as const };
+    };
+    const iterator = harness.runtime.chatStream(
+      hrCaller(tenantA, userA, false),
+      { message: "Stop this reply.", script: [{ text: "unused" }] },
+      meta,
+      controller.signal,
+    );
+    const first = await iterator.next();
+    assert.equal(first.value?.type, "token");
+    controller.abort();
+    const rest = [];
+    for await (const event of iterator) rest.push(event);
+    assert.equal(released, true);
+    assert.equal(JSON.stringify(rest).includes(NIK), false);
+    assert.equal(rest.some((event) => event.type === "done"), false);
+  });
+
+  it("keeps payroll finalize pending until the authenticator is verified", async () => {
+    const harness = harnessFor(app);
+    const owner = {
+      ...hrCaller(tenantA, userA, false),
+      role: "org_owner",
+      permissions: ["payroll.run.finalize", "ai.action.approve", "employee.pii.read"] as const,
+    };
+    const proposed = await harness.runtime.chat(
+      owner,
+      {
+        message: "Finalize January.",
+        script: [
+          {
+            toolCalls: [
+              {
+                name: "propose_payroll_finalize",
+                arguments: {
+                  payrollRunId: "55555555-5555-4555-8555-555555555555",
+                  periodLabel: "2026-01",
+                  netPayIdr: "15000000",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      meta,
+    );
+    assert.equal(proposed.ok, true);
+    if (!proposed.ok) return;
+    const proposal = proposed.data.proposals[0];
+    assert.equal(proposal?.requiresTotp, true);
+    if (!proposal?.confirmationNonce) throw new Error("proposal nonce missing");
+    const denied = await harness.runtime.confirmProposal(owner, proposal.id, proposal.confirmationNonce, meta);
+    assert.equal(denied.ok, false);
+    if (denied.ok) return;
+    assert.equal(denied.code, "totp_verification_required");
+    assert.equal(harness.executions.length, 0);
+    const allowed = await harness.runtime.confirmProposal(
+      { ...owner, sessionTotpVerified: true },
+      proposal.id,
+      proposal.confirmationNonce,
+      meta,
+    );
+    assert.equal(allowed.ok, true);
+    if (!allowed.ok) return;
+    assert.equal(allowed.data.status, "executed");
+    assert.equal(harness.executions.length, 1);
+    const thread = await harness.runtime.readLatest(owner);
+    assert.equal(thread.ok, true);
+    if (!thread.ok) return;
+    assert.equal(thread.data.proposals.some((item) => item.id === proposal.id && item.status === "executed"), true);
+    assert.equal(JSON.stringify(thread.data).includes("15000000"), true);
+    assertNoSamples(JSON.stringify(thread.data));
+  });
 });
 
 function syntheticTable(): StatutoryTable {

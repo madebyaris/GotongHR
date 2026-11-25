@@ -161,3 +161,59 @@ function looksLikeMoney(text: string, start: number): boolean {
   const prefix = text.slice(Math.max(0, start - 16), start).toLowerCase();
   return /(?:rp|idr|rupiah)\s*$/u.test(prefix);
 }
+
+const HOLDBACK = 64;
+const PARTIAL_SECRET = /(?:\d+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]*|\+?\d[\d\s.-]*)$/u;
+
+/**
+ * Holds back the tail of a provider chunk so a NIK split across reads
+ * is redacted before it is shown. `flush` releases the tail at a boundary.
+ */
+export function createStreamGate(): { push(chunk: string): string; flush(): string } {
+  let pending = "";
+  return {
+    push(chunk: string): string {
+      pending += chunk;
+      const cut = safeCut(pending);
+      if (cut <= 0) return "";
+      const ready = pending.slice(0, cut);
+      pending = pending.slice(cut);
+      return ready;
+    },
+    flush(): string {
+      const ready = pending;
+      pending = "";
+      return ready;
+    },
+  };
+}
+
+function safeCut(text: string): number {
+  if (text.length <= HOLDBACK) return 0;
+  let cut = text.length - HOLDBACK;
+  const head = text.slice(0, cut);
+  const partial = PARTIAL_SECRET.exec(head);
+  if (partial && typeof partial.index === "number") cut = partial.index;
+  return cut;
+}
+
+const PRESERVE_KEYS = new Set(["confirmationNonce", "confirmation_nonce"]);
+
+/** Redacts strings in a payload. Nonce fields are copied through unchanged. */
+export function scrubSecrets(value: unknown): unknown {
+  return scrubSecretsWith(value, new RedactionSession(), undefined);
+}
+
+function scrubSecretsWith(value: unknown, session: RedactionSession, key: string | undefined): unknown {
+  if (key && PRESERVE_KEYS.has(key)) return value;
+  if (typeof value === "string") return session.redact(value);
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map((item) => scrubSecretsWith(item, session, undefined));
+  if (!value || typeof value !== "object") return value;
+  if (value instanceof Date) return value.toISOString();
+  const out: Record<string, unknown> = {};
+  for (const [childKey, child] of Object.entries(value)) {
+    out[childKey] = scrubSecretsWith(child, session, childKey);
+  }
+  return out;
+}

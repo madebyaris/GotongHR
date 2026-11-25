@@ -23,6 +23,10 @@ test.beforeAll(async () => {
   await resetEmployees();
 });
 
+test.afterAll(async () => {
+  await clearOwnerTotp();
+});
+
 test("owner adds an employee, keeps the masked NIK, and reveals it once", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
@@ -134,15 +138,10 @@ async function assertRevealLog(): Promise<void> {
   }
 }
 
-async function resetEmployees(): Promise<void> {
-  const client = await openSuperuser();
+async function clearOwnerTotp(existing?: pg.Client): Promise<void> {
+  const client = existing ?? (await openSuperuser());
   try {
-    await client.query("TRUNCATE TABLE hr_employee_pii, hr_employees");
-    await client.query("DELETE FROM aud_pii_access_logs WHERE reason = 'BPJS registration'");
-    await client.query(
-      `UPDATE ba_user SET two_factor_enabled = false WHERE email = $1`,
-      [email],
-    );
+    await client.query(`UPDATE ba_user SET two_factor_enabled = false WHERE email = $1`, [email]);
     await client.query(
       `DELETE FROM ba_two_factor
        WHERE user_id = (SELECT id FROM ba_user WHERE email = $1)`,
@@ -153,6 +152,17 @@ async function resetEmployees(): Promise<void> {
        WHERE auth_user_id = (SELECT id FROM ba_user WHERE email = $1)`,
       [email],
     );
+  } finally {
+    if (!existing) await client.end();
+  }
+}
+
+async function resetEmployees(): Promise<void> {
+  const client = await openSuperuser();
+  try {
+    await client.query("TRUNCATE TABLE hr_employee_pii, hr_employees");
+    await client.query("DELETE FROM aud_pii_access_logs WHERE reason = 'BPJS registration'");
+    await clearOwnerTotp(client);
   } finally {
     await client.end();
   }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { RedactionSession } from "./redact.ts";
+import { createStreamGate, RedactionSession, scrubSecrets } from "./redact.ts";
 
 const NIK = "3175012345670001";
 const NPWP = "09.876.543.2-109.000";
@@ -38,4 +38,29 @@ test("a uuid is not treated as a bank account", () => {
   const session = new RedactionSession();
   const source = "employee 11111111-1111-4111-8111-111111111111";
   assert.equal(session.redact(source), source);
+});
+
+test("a stream gate does not release a NIK split across chunks", () => {
+  const session = new RedactionSession();
+  const gate = createStreamGate();
+  const nik = "3175012345670001";
+  const text = `${"a".repeat(80)} NIK ${nik} ${"b".repeat(80)}`;
+  let emitted = "";
+  for (let index = 0; index < text.length; index += 7) {
+    const ready = gate.push(text.slice(index, index + 7));
+    if (ready) emitted += session.redact(ready);
+  }
+  emitted += session.redact(gate.flush());
+  assert.equal(emitted.includes(nik), false);
+  assert.match(emitted, /\[EMP_01_NIK\]/u);
+});
+
+test("scrubSecrets keeps a confirmation nonce and removes a NIK", () => {
+  const nonce = "nonce-3175012345670001-ok";
+  const scrubbed = scrubSecrets({
+    confirmationNonce: nonce,
+    impactPreview: { summary: "NIK 3175012345670002" },
+  }) as { confirmationNonce: string; impactPreview: { summary: string } };
+  assert.equal(scrubbed.confirmationNonce, nonce);
+  assert.equal(scrubbed.impactPreview.summary.includes("3175012345670002"), false);
 });

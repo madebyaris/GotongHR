@@ -12,6 +12,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ApiRequestError, apiData } from "@/lib/api";
 import { fieldClass, SetupColumn, SetupHeader, TextField } from "../shell";
+import { AdminFrame } from "./frame";
 
 const taxMethods = [
   { value: "gross", label: "Gross" },
@@ -40,6 +41,14 @@ const fieldOrder = [
 ];
 
 export default function EmployeesPage() {
+  return (
+    <AdminFrame>
+      <EmployeesBody />
+    </AdminFrame>
+  );
+}
+
+function EmployeesBody() {
   const navigate = useNavigate();
   const context = useQuery({
     queryKey: ["me", "context"],

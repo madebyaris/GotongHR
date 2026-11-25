@@ -35,7 +35,7 @@ export type LlmStreamEvent =
 export interface LlmProvider {
   readonly name: "fake" | "xai";
   complete(request: LlmRequest): Promise<LlmCompletion>;
-  stream(request: LlmRequest): AsyncIterable<LlmStreamEvent>;
+  stream(request: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamEvent>;
 }
 
 export interface FakeStep {
@@ -121,7 +121,7 @@ export function createXaiProvider(env: NodeJS.ProcessEnv): LlmProvider {
   const model = env.LLM_MODEL?.trim() || "grok-4";
   const endpoint = "https://api.x.ai/v1/chat/completions";
 
-  async function post(request: LlmRequest, stream: boolean): Promise<Response> {
+  async function post(request: LlmRequest, stream: boolean, signal?: AbortSignal): Promise<Response> {
     if (!apiKey) throw new Error("XAI_API_KEY is not set.");
     return fetch(endpoint, {
       method: "POST",
@@ -130,6 +130,7 @@ export function createXaiProvider(env: NodeJS.ProcessEnv): LlmProvider {
         "content-type": "application/json",
       },
       body: JSON.stringify(xaiBody(model, request, stream)),
+      ...(signal ? { signal } : {}),
     });
   }
 
@@ -141,8 +142,8 @@ export function createXaiProvider(env: NodeJS.ProcessEnv): LlmProvider {
       const body = (await response.json()) as { choices?: XaiChoice[] };
       return completionFromChoice(body.choices?.[0]);
     },
-    async *stream(request) {
-      const response = await post(request, true);
+    async *stream(request, signal) {
+      const response = await post(request, true, signal);
       if (!response.ok) throw new Error(`xAI request failed with status ${response.status}.`);
       if (!response.body) throw new Error("xAI stream was empty.");
       yield* readXaiStream(response.body);
@@ -216,7 +217,7 @@ export async function* readXaiStream(body: ReadableStream<Uint8Array>): AsyncIte
       }
     }
   } finally {
-    reader.releaseLock();
+    await reader.cancel().catch(() => undefined);
   }
   yield { type: "done" };
 }

@@ -244,6 +244,68 @@ describe("ai http", { concurrency: 1 }, () => {
     assert.deepEqual(await employeeVaultState(), employeesBefore);
     assertNoSamples(await persistedText());
   });
+
+  it("streams SSE events and still returns JSON without an event-stream accept", async () => {
+    const json = await chat(ownerCookie, "JSON still works.", [{ text: "JSON ok." }]);
+    assert.equal(json.statusCode, 200, json.body);
+    assert.match(String(json.headers["content-type"]), /application\/json/u);
+    assert.equal(readData(json.body).message, "JSON ok.");
+
+    let streams = 0;
+    const original = provider.stream.bind(provider);
+    provider.stream = (request, signal) => {
+      streams += 1;
+      return original(request, signal);
+    };
+    const response = await composedApp().inject({
+      method: "POST",
+      url: "/api/v1/ai/chat",
+      headers: { origin, cookie: ownerCookie, "content-type": "application/json", accept: "text/event-stream" },
+      payload: {
+        message: `NIK ${NIK}. Set the streamed name.`,
+        stream: true,
+        fakeScript: [
+          {
+            text: `Ready ${NIK}`,
+            toolCalls: [{ name: "propose_employee_change", arguments: { employeeId, field: "display_name", value: "Sari" } }],
+          },
+        ],
+      },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.match(String(response.headers["content-type"]), /text\/event-stream/u);
+    assert.equal(streams > 0, true);
+    assertNoSamples(response.body);
+    const events = readSse(response.body);
+    assert.equal(events.some((event) => event.event === "token"), true);
+    assert.equal(events.some((event) => event.event === "tool"), true);
+    const proposal = events.find((event) => event.event === "proposal");
+    const done = events.at(-1);
+    assert.equal(proposal?.event, "proposal");
+    assert.equal(done?.event, "done");
+    const card = proposal?.data.proposal as { id?: string; confirmationNonce?: string; impactPreview?: { diff?: unknown } } | undefined;
+    if (!card?.id || !card.confirmationNonce) throw new Error("stream did not include a proposal card");
+    assert.equal(JSON.stringify(card.impactPreview).includes(NIK), false);
+    const confirmed = await composedApp().inject({
+      method: "POST",
+      url: `/api/v1/ai/proposals/${card.id}/confirm`,
+      headers: { origin, cookie: ownerCookie, "content-type": "application/json" },
+      payload: { confirmation_nonce: card.confirmationNonce },
+    });
+    assert.equal(confirmed.statusCode, 200, confirmed.body);
+    assert.equal(readData(confirmed.body).status, "executed");
+    const replay = await confirm(ownerCookie, card.id, card.confirmationNonce);
+    assert.equal(replay.statusCode, 409);
+    const latest = await composedApp().inject({
+      method: "GET",
+      url: "/api/v1/ai/conversations/latest",
+      headers: { origin, cookie: ownerCookie },
+    });
+    assert.equal(latest.statusCode, 200, latest.body);
+    assert.equal(latest.body.includes(card.confirmationNonce), false);
+    assert.equal(latest.body.includes(NIK), false);
+    assert.match(latest.body, /executed/u);
+  });
 });
 
 async function ownerProposal(message: string): Promise<{ id: string; nonce: string }> {
@@ -316,9 +378,25 @@ function readCode(body: string): string | undefined {
 
 function readData(body: string): {
   status?: string;
+  message?: string;
   proposals?: Array<{ id: string; confirmationNonce: string }>;
 } {
-  return (JSON.parse(body) as { data: { status?: string; proposals?: Array<{ id: string; confirmationNonce: string }> } }).data;
+  return (JSON.parse(body) as { data: { status?: string; message?: string; proposals?: Array<{ id: string; confirmationNonce: string }> } }).data;
+}
+
+function readSse(body: string): Array<{ event: string; data: Record<string, unknown> }> {
+  const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+  for (const block of body.split("\n\n")) {
+    if (block.trim().length === 0) continue;
+    let event = "message";
+    let data = "";
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data += line.slice(5).trim();
+    }
+    events.push({ event, data: JSON.parse(data) as Record<string, unknown> });
+  }
+  return events;
 }
 
 async function persistedText(): Promise<string> {
