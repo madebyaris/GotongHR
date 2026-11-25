@@ -3,18 +3,20 @@ import { nonNegativeRupiah, rupiah } from "../money.ts";
 import { bpjsComponent } from "./component.ts";
 
 /**
- * JKP recomposition from the architecture spec: 0.46 percent of the floored wage.
- * The parts are 0.22 percent from the central government, 0.14 percent from JKK,
- * and 0.10 percent from JKM. A regulation change to this split stays in this file.
+ * JKP memo under PP 6/2025. The total is 0.36 percent of the capped wage.
+ * The parts are 0.22 percent from the central government and 0.14 percent recomposed from JKK.
+ * JKM is no longer recomposed, so that part is zero.
+ * A regulation change to this split or this cap stays in this file.
  * Each part rounds half up. The total is the sum of those parts, so the parts add up.
  * This amount is a memo. It is not added to the employer or employee payable totals.
  * The employer still remits the full JKK risk rate and the full JKM rate.
- * The spec states no separate JKP wage cap, so the floored wage is used in full.
  */
+export const JKP_WAGE_CAP = 5_000_000n;
+
 export const jkpRecompositionParts = {
   governmentPerScale: 22n,
   fromJkkPerScale: 14n,
-  fromJkmPerScale: 10n,
+  fromJkmPerScale: 0n,
   rateScale: 10_000n,
 } as const;
 
@@ -27,12 +29,13 @@ export interface JkpRecomposition {
 }
 
 export function jkpRecomposition(flooredWage: bigint): JkpRecomposition {
-  const wageBasis = nonNegativeRupiah(flooredWage, "wage");
+  const wage = nonNegativeRupiah(flooredWage, "wage");
+  const wageBasis = wage > JKP_WAGE_CAP ? JKP_WAGE_CAP : wage;
   const government = bpjsComponent(wageBasis, jkpRecompositionParts.governmentPerScale);
   const fromJkk = bpjsComponent(wageBasis, jkpRecompositionParts.fromJkkPerScale);
   const fromJkm = bpjsComponent(wageBasis, jkpRecompositionParts.fromJkmPerScale);
   return {
-    wageBasis,
+    wageBasis: rupiah(wageBasis),
     government: rupiah(government),
     fromJkk: rupiah(fromJkk),
     fromJkm: rupiah(fromJkm),

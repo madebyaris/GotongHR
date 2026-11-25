@@ -35,7 +35,7 @@ export interface CalculateBpjsResult {
 /**
  * BPJS for one wage. Kesehatan is capped at Rp12,000,000 after the UMP or UMK floor.
  * JP reads the table cap and throws MissingStatutoryValueError when that cap is missing.
- * JKK, JKM, JHT, and the JKP memo use the floored wage.
+ * JKK, JKM, and JHT use the floored wage. JKP caps that wage inside jkp.ts.
  * Payable totals omit JKP. The employer already remits full JKK and full JKM.
  * A draft table is refused unless allowUndeclared is set.
  */

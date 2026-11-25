@@ -30,7 +30,7 @@ export { calculateBpjs } from "./bpjs/calculate.ts";
 export type { CalculateBpjsInput, CalculateBpjsResult } from "./bpjs/calculate.ts";
 export { calculateJkk, jkkRiskClasses } from "./bpjs/jkk.ts";
 export type { JkkResult, JkkRiskClass } from "./bpjs/jkk.ts";
-export { jkpRecomposition, jkpRecompositionParts } from "./bpjs/jkp.ts";
+export { JKP_WAGE_CAP, jkpRecomposition, jkpRecompositionParts } from "./bpjs/jkp.ts";
 export type { JkpRecomposition } from "./bpjs/jkp.ts";
 export { calculateKesehatan, KESEHATAN_WAGE_CAP } from "./bpjs/kesehatan.ts";
 export type { KesehatanResult } from "./bpjs/kesehatan.ts";

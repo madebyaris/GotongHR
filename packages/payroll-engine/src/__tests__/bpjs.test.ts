@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
 import {
+  JKP_WAGE_CAP,
   KESEHATAN_WAGE_CAP,
   MissingStatutoryValueError,
   PayrollInputError,
@@ -37,7 +38,7 @@ test("Kesehatan is 4 percent employer and 1 percent employee under the cap", () 
   const result = bpjs({ wage: 10_000_000n });
   assert.equal(result.kesehatan.wageBasis, 10_000_000n);
   assert.equal(result.kesehatan.programEmployer, 400_000n);
-  assert.equal(result.kesehatan.additionalFamilyEmployer, 0n);
+  assert.equal(result.kesehatan.additionalFamilyEmployee, 0n);
   assert.equal(result.kesehatan.employer, 400_000n);
   assert.equal(result.kesehatan.employee, 100_000n);
   assert.equal(result.flooredWage, 10_000_000n);
@@ -57,23 +58,24 @@ test("Kesehatan wage cap is Rp12,000,000 and the next rupiah stays capped", () =
   assert.equal(overCap.jkk.wageBasis, 12_000_001n);
 });
 
-test("each additional family member is 1 percent employer, rounded half up", () => {
+test("each additional family member is 1 percent employee, rounded half up", () => {
   const plain = calculateKesehatan(50n, 0);
   assert.equal(plain.employee, 1n);
+  assert.equal(plain.additionalFamilyEmployee, 0n);
   assert.equal(calculateKesehatan(49n, 0).employee, 0n);
   const family = calculateKesehatan(50n, 3);
   assert.equal(family.additionalFamilyMembers, 3);
-  assert.equal(family.additionalFamilyEmployer, 3n);
+  assert.equal(family.additionalFamilyEmployee, 3n);
   assert.equal(family.programEmployer, 2n);
-  assert.equal(family.employer, 5n);
-  assert.equal(family.employee, 1n);
+  assert.equal(family.employer, 2n);
+  assert.equal(family.employee, 4n);
 
   const capped = bpjs({ wage: 15_000_000n, additionalFamilyMembers: 2 });
   assert.equal(capped.kesehatan.wageBasis, 12_000_000n);
   assert.equal(capped.kesehatan.programEmployer, 480_000n);
-  assert.equal(capped.kesehatan.additionalFamilyEmployer, 240_000n);
-  assert.equal(capped.kesehatan.employer, 720_000n);
-  assert.equal(capped.kesehatan.employee, 120_000n);
+  assert.equal(capped.kesehatan.additionalFamilyEmployee, 240_000n);
+  assert.equal(capped.kesehatan.employer, 480_000n);
+  assert.equal(capped.kesehatan.employee, 360_000n);
 });
 
 test("BPJS component rounding is half up to the nearest rupiah", () => {
@@ -224,37 +226,46 @@ test("a present JP cap of zero ceilings the JP wage at zero", () => {
   assert.equal(result.jht.employer, 185_000n);
 });
 
-test("JKP recomposition is 0.22, 0.14, and 0.10, and payable totals omit it", () => {
+test("JKP is 0.36 percent, capped at Rp5,000,000, and payable totals omit it", () => {
+  assert.equal(JKP_WAGE_CAP, 5_000_000n);
   assert.equal(
     jkpRecompositionParts.governmentPerScale +
       jkpRecompositionParts.fromJkkPerScale +
       jkpRecompositionParts.fromJkmPerScale,
-    46n,
+    36n,
   );
+  assert.equal(jkpRecompositionParts.fromJkmPerScale, 0n);
   assert.equal(jkpRecompositionParts.rateScale, 10_000n);
 
   const wage = 10_000_000n;
   const direct = jkpRecomposition(wage);
   const result = bpjs({ wage, jkkRiskClass: 3, additionalFamilyMembers: 1 });
-  assert.equal(result.jkp.government, 22_000n);
-  assert.equal(result.jkp.fromJkk, 14_000n);
-  assert.equal(result.jkp.fromJkm, 10_000n);
-  assert.equal(result.jkp.total, 46_000n);
+  assert.equal(result.jkp.wageBasis, 5_000_000n);
+  assert.equal(result.jkp.government, 11_000n);
+  assert.equal(result.jkp.fromJkk, 7_000n);
+  assert.equal(result.jkp.fromJkm, 0n);
+  assert.equal(result.jkp.total, 18_000n);
   assert.equal(result.jkp.total, direct.total);
+  assert.equal(jkpRecomposition(5_000_000n).wageBasis, 5_000_000n);
+  assert.equal(jkpRecomposition(5_000_001n).wageBasis, 5_000_000n);
+  assert.equal(jkpRecomposition(4_000_000n).total, 14_400n);
   assert.equal(result.jkk.employer, 89_000n);
   assert.equal(result.jkm.employer, 30_000n);
-  assert.equal(result.kesehatan.additionalFamilyEmployer, 100_000n);
-  assert.equal(result.employerPayable, 1_189_000n);
-  assert.equal(result.employeePayable, 400_000n);
+  assert.equal(result.kesehatan.additionalFamilyEmployee, 100_000n);
+  assert.equal(result.kesehatan.employer, 400_000n);
+  assert.equal(result.kesehatan.employee, 200_000n);
+  assert.equal(result.employerPayable, 1_089_000n);
+  assert.equal(result.employeePayable, 500_000n);
 });
 
-test("JKP total is the sum of half-up parts, not one rounding of 0.46 percent", () => {
+test("JKP total is the sum of half-up parts, not one rounding of 0.36 percent", () => {
   const parts = jkpRecomposition(227n);
+  assert.equal(parts.wageBasis, 227n);
   assert.equal(parts.government, 0n);
   assert.equal(parts.fromJkk, 0n);
   assert.equal(parts.fromJkm, 0n);
   assert.equal(parts.total, 0n);
-  assert.equal(applyScaledRate(227n, 46n, 10_000n, "half_up"), 1n);
+  assert.equal(applyScaledRate(227n, 36n, 10_000n, "half_up"), 1n);
 });
 
 test("JKP recomposition rates live only in jkp.ts", () => {
@@ -268,7 +279,8 @@ test("JKP recomposition rates live only in jkp.ts", () => {
   const jkp = readFileSync(path.join(bpjsDir, "jkp.ts"), "utf8");
   assert.match(jkp, /22n/);
   assert.match(jkp, /14n/);
-  assert.match(jkp, /10n/);
+  assert.match(jkp, /5_000_000n/);
+  assert.doesNotMatch(jkp, /10n|46n/);
 });
 
 test("BPJS rejects negative wage, a bad risk class, and a missing floor", () => {
@@ -311,7 +323,8 @@ test("the same BPJS input returns the same bigint", () => {
           first.employeePayable === second.employeePayable &&
           first.jkp.total === first.jkp.government + first.jkp.fromJkk + first.jkp.fromJkm &&
           first.kesehatan.wageBasis <= KESEHATAN_WAGE_CAP &&
-          first.jp.wageBasis <= monthlyCap
+          first.jp.wageBasis <= monthlyCap &&
+          first.jkp.wageBasis <= JKP_WAGE_CAP
         );
       },
     ),

@@ -1,5 +1,6 @@
 import type { Idr } from "@gotonghr/contracts";
-import { nonNegativeRupiah, rupiah, sumRupiah } from "../money.ts";
+import { monthlyFixedWage } from "../monthly-fixed-wage.ts";
+import { rupiah } from "../money.ts";
 import { wholeCount } from "../whole-count.ts";
 
 export interface ThrInput {
@@ -21,11 +22,4 @@ export function calculateThr(input: ThrInput): Idr {
   if (months < 1) return rupiah(0n);
   if (months >= 12) return wage;
   return rupiah((wage * BigInt(months)) / 12n);
-}
-
-function monthlyFixedWage(baseSalary: bigint, fixedAllowances: bigint): Idr {
-  return sumRupiah([
-    nonNegativeRupiah(baseSalary, "baseSalary"),
-    nonNegativeRupiah(fixedAllowances, "fixedAllowances"),
-  ]);
 }

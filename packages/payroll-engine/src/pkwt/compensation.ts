@@ -1,5 +1,6 @@
 import type { Idr } from "@gotonghr/contracts";
-import { nonNegativeRupiah, rupiah, sumRupiah } from "../money.ts";
+import { monthlyFixedWage } from "../monthly-fixed-wage.ts";
+import { rupiah } from "../money.ts";
 import { wholeCount } from "../whole-count.ts";
 
 export interface PkwtCompensationInput {
@@ -16,9 +17,6 @@ export interface PkwtCompensationInput {
  */
 export function calculatePkwtCompensation(input: PkwtCompensationInput): Idr {
   const months = wholeCount(input.completedMonths, "completedMonths", 1);
-  const wage = sumRupiah([
-    nonNegativeRupiah(input.baseSalary, "baseSalary"),
-    nonNegativeRupiah(input.fixedAllowances, "fixedAllowances"),
-  ]);
+  const wage = monthlyFixedWage(input.baseSalary, input.fixedAllowances);
   return rupiah((wage * BigInt(months)) / 12n);
 }

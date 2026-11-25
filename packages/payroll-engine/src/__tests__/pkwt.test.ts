@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import fc from "fast-check";
+import * as payrollEngine from "../index.ts";
 import { PayrollInputError, calculatePkwtCompensation, calculateThr } from "../index.ts";
 
 const src = fileURLToPath(new URL("../", import.meta.url));
@@ -69,8 +70,9 @@ test("PKWT compensation rejects fewer than 1 completed month and negative wage",
 
 test("pesangon, UPMK, and UPH are not in the public API", () => {
   assert.equal(existsSync(path.join(src, "pkwt", "severance.ts")), false);
-  const index = readFileSync(path.join(src, "index.ts"), "utf8");
-  assert.doesNotMatch(index, /severance|pesangon|upmk|uph/i);
+  for (const name of Object.keys(payrollEngine)) {
+    assert.doesNotMatch(name, /severance|pesangon|upmk|uph/i, name);
+  }
 });
 
 test("PKWT compensation matches the floor formula for completed months", () => {

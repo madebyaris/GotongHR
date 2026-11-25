@@ -50,7 +50,7 @@ export function overtimeHourlyWage(monthlyWage: bigint): Idr {
  * Minutes past the last hour of a rest or holiday schedule throw PayrollInputError.
  */
 export function calculateOvertime(input: OvertimeInput): OvertimeResult {
-  const monthlyWage = requireWage(input.monthlyWage);
+  const hourlyWage = overtimeHourlyWage(input.monthlyWage);
   const minutes = wholeCount(input.minutes, "minutes", 0);
   if (!isOvertimeDayKind(input.dayKind)) {
     throw new PayrollInputError(
@@ -58,13 +58,12 @@ export function calculateOvertime(input: OvertimeInput): OvertimeResult {
     );
   }
   const schedule = overtimeSchedule(input.dayKind);
-  const hourlyWage = applyScaledRate(monthlyWage, 1n, HOUR_DIVISOR, "half_up");
   const weightedHalves = minuteWeights(minutes, input.dayKind, schedule);
   const pay = applyScaledRate(hourlyWage, weightedHalves, HALF_SCALE * MINUTES_PER_HOUR, "half_up");
   return {
     dayKind: input.dayKind,
     minutes,
-    hourlyWage: rupiah(hourlyWage),
+    hourlyWage,
     pay: rupiah(pay),
   };
 }
