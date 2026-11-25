@@ -56,6 +56,7 @@ const deniedTables = [
   "hr_import_jobs",
   "hr_positions",
   "hr_secret",
+  "att_clock_events",
   "att_secret",
   "pay_run",
   "id_memberships",

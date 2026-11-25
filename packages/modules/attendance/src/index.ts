@@ -1,6 +1,6 @@
 /**
- * Slice 3.1 schedules, leave, and overtime.
- * Slice 3.2 clock events belong in `src/clock` and re-export beside this file.
+ * Schedules, leave, and overtime live in src/schedules.
+ * Clock events live in src/clock.
  */
 export type { AttendanceCaller } from "./schedules/auth.ts";
 export { migrateAttendance } from "./schedules/migrate.ts";
@@ -18,3 +18,9 @@ export {
   attRosters,
   attShifts,
 } from "./schedules/schema.ts";
+export {
+  attClockEvents,
+  migrateClock,
+  registerClockRoutes,
+} from "./clock/index.ts";
+export type { ClockCaller, ClockMigrateInput, ClockRouteDeps } from "./clock/index.ts";

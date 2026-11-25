@@ -162,6 +162,7 @@ async function resetEmployees(): Promise<void> {
   try {
     await client.query(
       `TRUNCATE TABLE
+         att_clock_events,
          hr_contract_expiry_notices,
          hr_compensation_profiles,
          hr_contracts,
