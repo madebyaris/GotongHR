@@ -28,6 +28,7 @@ test.afterAll(async () => {
 });
 
 test("owner adds an employee, keeps the masked NIK, and reveals it once", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
   await ensureCompany(page);
@@ -35,8 +36,11 @@ test("owner adds an employee, keeps the masked NIK, and reveals it once", async 
   await expect(page.getByRole("heading", { name: "Employees" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText("No employees yet.");
   await shot(page, "slice-2-1-empty-wide.png");
+  await shot(page, "slice-2-4-empty-wide.png");
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, "slice-2-1-empty-phone.png");
+  await shot(page, "slice-2-4-empty-phone.png");
+  await expectNoHorizontalOverflow(page);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await fillEmployee(page, badNik);
@@ -44,8 +48,11 @@ test("owner adds an employee, keeps the masked NIK, and reveals it once", async 
   await expect(page.getByRole("alert")).toContainText("Check the highlighted fields.");
   await expect(page.getByText("NIK birth date is not a real date.")).toBeVisible();
   await shot(page, "slice-2-1-error-wide.png");
+  await shot(page, "slice-2-4-error-wide.png");
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, "slice-2-1-error-phone.png");
+  await shot(page, "slice-2-4-error-phone.png");
+  await expectNoHorizontalOverflow(page);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByLabel("NIK").fill(nik);
@@ -69,6 +76,74 @@ test("owner adds an employee, keeps the masked NIK, and reveals it once", async 
   await expect(page.getByText(`NIK ${nik}`)).toBeVisible();
   await expect(page.locator("td").getByText(mask)).toBeVisible();
   await assertRevealLog();
+
+  const longName = "Anastasia Putri Widyaningrum Kartikasari";
+  const endDate = addDays(jakartaToday(), 45);
+  await page.getByLabel("Full name").fill(longName);
+  await page.getByLabel("Employee code").fill("E-LONG-02");
+  await page.getByLabel("NIK").fill("3273011608950002");
+  await page.getByLabel("Status", { exact: true }).selectOption("probation");
+  await page.getByRole("button", { name: "Add employee" }).click();
+  await expect(page.getByRole("status").first()).toContainText(`Saved. ${longName}.`);
+
+  await page.getByRole("button", { name: longName }).click();
+  const profile = page.getByRole("region", { name: "Employee profile" });
+  await expect(profile.getByRole("heading", { name: longName })).toBeVisible();
+  await expect(profile).toContainText("PT Surya Nusantara");
+  await expect(profile).toContainText("Jakarta Pusat");
+
+  await profile.getByLabel("New department").fill("People Operations");
+  await profile.getByRole("button", { name: "Add department" }).click();
+  await expect(profile.getByRole("option", { name: "People Operations" })).toHaveCount(1);
+  await profile.getByLabel("New position").fill("HR Generalist");
+  await profile.getByRole("button", { name: "Add position" }).click();
+  await expect(profile.getByRole("option", { name: "HR Generalist" })).toHaveCount(1);
+  await profile.getByRole("button", { name: "Save assignment" }).click();
+  await expect(page.locator("td").getByText("People Operations")).toBeVisible();
+  await expect(page.locator("td").getByText("HR Generalist")).toBeVisible();
+
+  await profile.getByLabel("End date").fill("");
+  await profile.getByRole("button", { name: "Add contract" }).click();
+  await expect(profile.getByText("Enter the contract end date.")).toBeVisible();
+  await profile.getByLabel("Start date").fill(jakartaToday());
+  await profile.getByLabel("End date").fill(endDate);
+  await profile.getByRole("button", { name: "Add contract" }).click();
+  await expect(page.locator("td").getByText("PKWT")).toBeVisible();
+  await expect(page.locator("td").getByText(/ends in \d+ days/)).toBeVisible();
+
+  await profile.getByLabel("Base salary").fill("8.500.000");
+  await profile.getByLabel("Effective date").fill(jakartaToday());
+  await profile.getByRole("button", { name: "Add pay" }).click();
+  await expect(profile).toContainText("Rp8.500.000");
+  await expect(profile.getByText("Current")).toBeVisible();
+
+  await profile.getByRole("button", { name: "Back to directory" }).click();
+  await expect(profile).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: longName })).toBeVisible();
+  await expect(page.locator("td").getByText(/ends in \d+ days/)).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await shot(page, "slice-2-4-directory-wide.png");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, "slice-2-4-directory-phone.png");
+  await expectNoHorizontalOverflow(page);
+
+  await page.getByLabel("Name or code").fill("Widyaningrum");
+  await expect(page.getByRole("button", { name: "Sari Wulandari" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: longName })).toBeVisible();
+  await page.getByLabel("Name or code").fill("e-long");
+  await expect(page.getByRole("button", { name: longName })).toBeVisible();
+  await page.getByLabel("Filter by status").selectOption("probation");
+  await expect(page.getByRole("button", { name: "Sari Wulandari" })).toHaveCount(0);
+  await page.getByLabel("Name or code").fill("");
+  await page.getByLabel("Filter by status").selectOption({ label: "All statuses" });
+  await page.getByLabel("Filter by department").selectOption({ label: "People Operations" });
+  await expect(page.getByRole("button", { name: "Sari Wulandari" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: longName })).toBeVisible();
+  await page.getByLabel("Contract", { exact: true }).selectOption("PKWT");
+  await page.getByRole("button", { name: longName }).click();
+  await expect(page.getByRole("region", { name: "Employee profile" })).toContainText(/ends in \d+ days/);
+  await expect(page.getByRole("region", { name: "Employee profile" })).toContainText("Rp8.500.000");
 });
 
 async function fillEmployee(page: Page, value: string): Promise<void> {
@@ -160,7 +235,16 @@ async function clearOwnerTotp(existing?: pg.Client): Promise<void> {
 async function resetEmployees(): Promise<void> {
   const client = await openSuperuser();
   try {
-    await client.query("TRUNCATE TABLE hr_employee_pii, hr_employees");
+    await client.query(
+      `TRUNCATE TABLE
+         hr_compensation_profiles,
+         hr_contracts,
+         hr_documents,
+         hr_employee_pii,
+         hr_employees,
+         hr_positions,
+         hr_departments`,
+    );
     await client.query("DELETE FROM aud_pii_access_logs WHERE reason = 'BPJS registration'");
     await clearOwnerTotp(client);
   } finally {
@@ -184,6 +268,26 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "Set up the company" })).toBeVisible();
+}
+
+function jakartaToday(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(new Date());
+}
+
+function addDays(iso: string, days: number): string {
+  const year = Number(iso.slice(0, 4));
+  const month = Number(iso.slice(5, 7));
+  const day = Number(iso.slice(8, 10));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const fits = await page.evaluate(
+    () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+  );
+  expect(fits).toBe(true);
 }
 
 async function shot(page: Page, name: string): Promise<void> {

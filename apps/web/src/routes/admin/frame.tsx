@@ -4,11 +4,12 @@ import type { ReactNode } from "react";
 const linkClass =
   "inline-flex min-h-11 items-center text-base font-medium text-foreground underline-offset-4 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
-export function AdminFrame({ children }: { children: ReactNode }) {
+export function AdminFrame({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  const width = wide ? "max-w-6xl" : "max-w-xl";
   return (
-    <div className="min-h-svh bg-background text-foreground">
+    <div className="min-h-svh overflow-x-clip bg-background text-foreground">
       <header className="border-b border-border">
-        <div className="mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2">
+        <div className={`mx-auto flex w-full ${width} flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-2`}>
           <p className="text-sm font-medium text-muted-foreground">GotongHR</p>
           <nav aria-label="Admin" className="flex flex-wrap justify-end gap-x-4">
             <Link to="/admin" className={linkClass} activeOptions={{ exact: true }}>

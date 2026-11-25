@@ -325,6 +325,15 @@ async function insertOne(
   try {
     await insertImportedEmployee(tx, actor, input, secrets);
   } catch (error) {
+    if (errorCode(error) === "23503") {
+      const constraint = errorConstraint(error);
+      const field = constraint.includes("department")
+        ? "departmentId"
+        : constraint.includes("position")
+          ? "positionId"
+          : "branchId";
+      throw new ImportRollback([{ line, field, message: "That reference was not found." }]);
+    }
     if (errorCode(error) !== "23505") throw error;
     const constraint = errorConstraint(error);
     const field = constraint.includes("nik_hash") ? "nik" : constraint.includes("code") ? "employeeCode" : "body";

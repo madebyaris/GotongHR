@@ -10,6 +10,7 @@ import {
   EmployeeForbiddenError,
   EmployeeNotFoundError,
 } from "./errors.ts";
+import { assertOrgAssignment } from "./directory/placement.ts";
 import { findEmployeeTx } from "./read.ts";
 import { nikHashFor, npwpHashFor, sealField, sealPii } from "./seal.ts";
 import { asObject, clip, errorCode, errorConstraint, queryRows } from "./sql.ts";
@@ -24,6 +25,7 @@ export async function createEmployee(
   try {
     return await appDb.withTenantContext(auth.tenantId, async (tx) => {
       await assertPlacement(tx, input.legalEntityId, input.branchId);
+      await assertOrgAssignment(tx, input.departmentId, input.positionId);
       const sealed = await sealPii(tx, auth.tenantId, input);
       const employeeId = await insertEmployee(tx, auth, input);
       await insertPii(tx, auth, employeeId, sealed);
@@ -50,6 +52,7 @@ export async function updateEmployee(
       const next = merged(current, patch);
       assertInScope(auth, next.legalEntityId, next.branchId);
       await assertPlacement(tx, next.legalEntityId, next.branchId);
+      await assertOrgAssignment(tx, next.departmentId, next.positionId);
       const employeeChanged = await updateEmployeeRow(tx, auth, id, current, next);
       const piiChanged = await updatePiiRow(tx, auth, id, patch);
       if (!employeeChanged && !piiChanged) return current;
@@ -376,6 +379,12 @@ function rethrowEmployee(error: unknown): never {
   }
   if (code === "23505") {
     throw new EmployeeConflictError([{ field: "body", message: "That value is already used." }]);
+  }
+  if (code === "23503" && constraint.includes("department")) {
+    throw new EmployeeFieldError([{ field: "departmentId", message: "Choose a department." }]);
+  }
+  if (code === "23503" && constraint.includes("position")) {
+    throw new EmployeeFieldError([{ field: "positionId", message: "Choose a position." }]);
   }
   if (code === "23503") {
     throw new EmployeeFieldError([{ field: "branchId", message: "Choose a branch in this company." }]);

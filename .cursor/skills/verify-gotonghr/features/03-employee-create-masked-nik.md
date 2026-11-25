@@ -40,7 +40,8 @@ The script does the following, and a hand drive uses the same locators.
 ## Gotchas
 
 - Without a company, the page says `Set up the company before adding an employee` and the form is absent. Saving through the API with a guessed id is not this feature.
-- The table does not show join date, status, PTKP, tax method, or PPh 21 subject. A screenshot cannot prove those fields. Read the JSON.
+- The directory table shows the name, code, department, position, contract, masked NIK, and status. It does not show join date, PTKP, tax method, or PPh 21 subject. A screenshot cannot prove those four fields. Read the JSON.
+- The create form labels are unchanged: `Full name`, `Employee code`, `Legal entity`, `Branch`, `NIK`, `NPWP (optional)`, `Join date`, `Status`, `PTKP`, `Tax method`, and `PPh 21 subject`. The directory filters are separate labels: `Name or code`, `Filter by status`, `Filter by department`, and `Contract`.
 - The NIK box is cleared after a successful save. Assert the table mask, not the empty input.
 - `nik_enc` is ciphertext. A row that exists is not proof that the screen masks the NIK.
 - `E001` is unique per tenant. A second create on the same database returns a conflict. Use a fresh database.

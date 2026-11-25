@@ -1,4 +1,5 @@
 import type {
+  ContractType,
   EmployeeRecord,
   EmploymentStatus,
   Pph21SubjectType,
@@ -34,7 +35,34 @@ const columns = sql`
   p.kk_number_mask,
   p.bpjs_kesehatan_no_mask,
   p.bpjs_tk_no_mask,
-  p.bank_account_number_mask
+  p.bank_account_number_mask,
+  d.name AS department_name,
+  pos.name AS position_name,
+  contract.contract_type,
+  contract.end_date::text AS contract_end_date
+`;
+
+const employeeFrom = sql`
+  FROM hr_employees AS e
+  JOIN hr_employee_pii AS p ON p.employee_id = e.id AND p.tenant_id = e.tenant_id
+  LEFT JOIN hr_departments AS d ON d.id = e.department_id AND d.tenant_id = e.tenant_id
+  LEFT JOIN hr_positions AS pos ON pos.id = e.position_id AND pos.tenant_id = e.tenant_id
+  LEFT JOIN LATERAL (
+    SELECT c.contract_type, c.end_date
+    FROM hr_contracts AS c
+    WHERE c.employee_id = e.id AND c.tenant_id = e.tenant_id
+    ORDER BY
+      CASE
+        WHEN c.start_date <= (timezone('Asia/Jakarta', now()))::date
+         AND (c.end_date IS NULL OR c.end_date >= (timezone('Asia/Jakarta', now()))::date) THEN 0
+        WHEN c.start_date > (timezone('Asia/Jakarta', now()))::date THEN 1
+        ELSE 2
+      END,
+      c.end_date ASC NULLS LAST,
+      c.start_date DESC,
+      c.id DESC
+    LIMIT 1
+  ) AS contract ON true
 `;
 
 interface EmployeeRow {
@@ -56,6 +84,10 @@ interface EmployeeRow {
   bpjs_kesehatan_no_mask: string | null;
   bpjs_tk_no_mask: string | null;
   bank_account_number_mask: string | null;
+  department_name: string | null;
+  position_name: string | null;
+  contract_type: string | null;
+  contract_end_date: string | null;
 }
 
 export async function listEmployees(
@@ -83,8 +115,7 @@ export async function listEmployeesTx(
 ): Promise<EmployeeRecord[]> {
   const result = await tx.execute(sql`
     SELECT ${columns}
-    FROM hr_employees AS e
-    JOIN hr_employee_pii AS p ON p.employee_id = e.id AND p.tenant_id = e.tenant_id
+    ${employeeFrom}
     WHERE true
     ${scopeClause(auth)}
     ORDER BY e.created_at, e.id
@@ -100,8 +131,7 @@ export async function findEmployeeTx(
 ): Promise<EmployeeRecord | null> {
   const result = await tx.execute(sql`
     SELECT ${columns}
-    FROM hr_employees AS e
-    JOIN hr_employee_pii AS p ON p.employee_id = e.id AND p.tenant_id = e.tenant_id
+    ${employeeFrom}
     WHERE e.id = ${id}::uuid
     ${scopeClause(auth)}
   `);
@@ -118,6 +148,10 @@ function toRecord(row: EmployeeRow): EmployeeRecord {
     branchId: row.branch_id,
     departmentId: row.department_id,
     positionId: row.position_id,
+    departmentName: row.department_name,
+    positionName: row.position_name,
+    contractType: asContractType(row.contract_type),
+    contractEndDate: row.contract_end_date,
     employmentStatus: asStatus(row.employment_status),
     joinDate: row.join_date,
     ptkpStatus: asPtkp(row.ptkp_status),
@@ -130,6 +164,12 @@ function toRecord(row: EmployeeRow): EmployeeRecord {
     bpjsTkNoMask: row.bpjs_tk_no_mask,
     bankAccountNumberMask: row.bank_account_number_mask,
   };
+}
+
+function asContractType(value: string | null): ContractType | null {
+  if (value === null) return null;
+  if (value === "PKWT" || value === "PKWTT") return value;
+  throw new Error("contract type is not valid");
 }
 
 function asStatus(value: string): EmploymentStatus {

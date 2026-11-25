@@ -1,5 +1,6 @@
 import { APP_ROLE, PLATFORM_ROLE, QUEUE_ROLE, tenantIsolationPolicySql } from "@gotonghr/db";
 import pg from "pg";
+import { migrateDirectory } from "./directory/ddl.ts";
 import { migrateHrDocuments } from "./documents/ddl.ts";
 import { migrateHrImportJobs } from "./imports/ddl.ts";
 
@@ -28,6 +29,7 @@ export async function migrateCoreHr(input: CoreHrMigrateInput): Promise<void> {
         await migrator.query(tenantIsolationPolicySql(table));
         await grantAppDml(migrator, table);
       }
+      await migrateDirectory(migrator);
       await migrateHrDocuments(migrator);
       await migrateHrImportJobs(migrator);
       await migrator.query("COMMIT");
@@ -153,11 +155,11 @@ CREATE INDEX IF NOT EXISTS hr_employee_pii_npwp_hash_idx
   WHERE npwp_hash IS NOT NULL;
 
 COMMENT ON TABLE hr_employees IS
-  'Employee master without ciphertext. department_id and position_id have no target table until slice 2.2. FORCE RLS. platform_admin has no privileges.';
+  'Employee master without ciphertext. Department and position are optional. FORCE RLS. platform_admin has no privileges.';
 COMMENT ON TABLE hr_employee_pii IS
   'One row per employee. Ciphertext plus blind indexes. Lists read nik_mask and npwp_mask and do not decrypt. nik_hash is unique per tenant.';
-COMMENT ON COLUMN hr_employees.department_id IS 'Nullable until hr_departments exists in slice 2.2. No foreign key.';
-COMMENT ON COLUMN hr_employees.position_id IS 'Nullable until hr_positions exists in slice 2.2. No foreign key.';
+COMMENT ON COLUMN hr_employees.department_id IS 'Optional department. The foreign key is added with hr_departments.';
+COMMENT ON COLUMN hr_employees.position_id IS 'Optional position. The foreign key is added with hr_positions.';
 
 CREATE OR REPLACE FUNCTION hr_touch_updated_at()
 RETURNS trigger
