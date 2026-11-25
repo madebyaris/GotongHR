@@ -8,7 +8,7 @@ import type { BankBatchId } from "./types.ts";
  * Control row is BCA_KLIKBISNIS, debit account, YYYYMMDD, count, total.
  * Detail columns are Account, Name, Amount, Bank Code, Transfer Type, Remark, Email.
  * Bank code 014 is BCA. Any other code is LLG.
- * The transfer type column also allows RTGS and BIFAST, and v1 does not guess those.
+ * RTGS and BIFAST stay valid with any bank code, and v1 does not guess them.
  *
  * mandiri-kopra: MCM payroll CSV.
  * Control row is P, YYYYMMDD, debit account, count, total with two decimals.
@@ -18,6 +18,7 @@ import type { BankBatchId } from "./types.ts";
  * Control row is BNI_DIRECT, debit account, YYYYMMDD, count, total.
  * Detail columns are No, Debit Account, Beneficiary Account, Beneficiary Name, Currency, Amount, Remark, Transfer Type, Bank Code, Email.
  * Bank code 009 is INHOUSE. Any other code is SKN.
+ * RTGS and LLG stay valid with any bank code.
  *
  * bri-qlola: BRI Qlola mass transfer.
  * The first row is NO, NAMA, ACCOUNT, AMOUNT, EMAIL, REMARK, BANK_CODE.
