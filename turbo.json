@@ -11,7 +11,24 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "cache": false
+      "cache": false,
+      "passThroughEnv": [
+        "DATABASE_URL_SUPERUSER",
+        "DATABASE_URL_MIGRATOR",
+        "DATABASE_URL_APP",
+        "DATABASE_URL_PLATFORM",
+        "MIGRATOR_PASSWORD",
+        "APP_PASSWORD",
+        "PLATFORM_PASSWORD",
+        "STORAGE_DRIVER",
+        "STORAGE_LOCAL_SECRET",
+        "STORAGE_LOCAL_ROOT",
+        "STORAGE_URL_PREFIX",
+        "QUEUE_DRIVER",
+        "GOTONG_ROLE",
+        "GOTONG_DEPLOYMENT_MODE",
+        "NODE_ENV"
+      ]
     },
     "build": {
       "dependsOn": ["^build"],
