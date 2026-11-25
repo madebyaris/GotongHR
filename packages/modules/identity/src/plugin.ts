@@ -6,6 +6,7 @@ import fastifyBetterAuth from "fastify-better-auth";
 import type { GotongAuth } from "./auth.ts";
 import type { GotongAuthContext } from "./guard.ts";
 import { readAuthRateLimit, readTrustCloudflare, readTrustProxy } from "./env.ts";
+import { registerOrgRoutes } from "./org-routes.ts";
 import { createPostgresRateLimitStore, isCredentialRoute, rateLimitKey } from "./rate-limit.ts";
 
 export interface IdentityHandle {
@@ -71,6 +72,7 @@ export async function registerIdentity(
       });
     }
     await scope.register(fastifyBetterAuth, { auth: options.auth });
+    await registerOrgRoutes(scope);
   });
 }
 

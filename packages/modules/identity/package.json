@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build",
-    "test": "node --experimental-strip-types --test --test-reporter spec src/*.test.ts"
+    "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/*.test.ts"
   },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.7.28",

@@ -109,6 +109,36 @@ describe("api identity", { concurrency: 1 }, () => {
     assert.equal(Number(count.rows[0]?.count), 1);
   });
 
+  it("mounts company setup routes for the owner", async () => {
+    const anon = await composed.app.inject({ method: "GET", url: "/api/v1/me/context" });
+    assert.equal(anon.statusCode, 401);
+    assert.equal(readError(anon.body), "unauthenticated");
+    const created = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/legal-entities",
+      headers: { cookie: ownerCookie, "content-type": "application/json" },
+      payload: { companyName: "PT Surya Nusantara", npwp16: "4444444444444444" },
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    const entityId = (JSON.parse(created.body) as { data: { id: string } }).data.id;
+    const bad = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/branches",
+      headers: { cookie: ownerCookie, "content-type": "application/json" },
+      payload: {
+        legalEntityId: entityId,
+        name: "Jakarta",
+        nitku22: "123",
+        timezone: "Asia/Jakarta",
+        umpUmkIdr: "1000",
+      },
+    });
+    assert.equal(bad.statusCode, 400, bad.body);
+    const error = JSON.parse(bad.body) as { error: { code: string; fields: { field: string }[] } };
+    assert.equal(error.error.code, "invalid_field");
+    assert.equal(error.error.fields.some((field) => field.field === "nitku22"), true);
+  });
+
   it("keeps platform routes unmounted and sets secure cookies", async () => {
     const platform = await composed.app.inject({ method: "GET", url: "/api/v1/platform/tenants" });
     assert.equal(platform.statusCode, 404);
@@ -333,6 +363,8 @@ async function resetIdentity(): Promise<void> {
   try {
     await admin.query(`
       TRUNCATE TABLE
+        id_branches,
+        id_legal_entities,
         id_sessions,
         id_memberships,
         id_users,

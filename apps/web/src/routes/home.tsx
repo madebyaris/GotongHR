@@ -9,6 +9,7 @@ export default function HomePage() {
         <AlertTitle>GotongHR</AlertTitle>
       </Alert>
       <nav>
+        <Link to="/sign-in">Sign in</Link>
         <Link to="/admin">Admin</Link>
         <Link to="/ess">ESS</Link>
       </nav>

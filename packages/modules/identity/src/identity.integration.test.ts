@@ -27,6 +27,7 @@ import { migrateIdentity } from "./migrate.ts";
 import { registerIdentity } from "./plugin.ts";
 import { SingleTenantOccupiedError } from "./errors.ts";
 import { tenantCount } from "./directory.ts";
+import { cookieHeader, readErrorCode, resetIdentity, setCookieLines, superuserQuery } from "./testing.ts";
 
 const { Client } = pg;
 
@@ -94,7 +95,7 @@ describe("identity auth", { concurrency: 1 }, () => {
     });
     const signedIn = await signIn(app, ownerEmail, ownerPassword);
     assert.equal(signedIn.statusCode, 200, signedIn.body);
-    ownerCookie = cookieHeader(setCookies(signedIn));
+    ownerCookie = cookieHeader(setCookieLines(signedIn));
     assert.ok(ownerCookie.includes("="));
   });
 
@@ -176,7 +177,7 @@ describe("identity auth", { concurrency: 1 }, () => {
 
   it("sets HttpOnly Secure SameSite=Lax cookies", async () => {
     const signedIn = await signIn(app, ownerEmail, ownerPassword);
-    const cookies = setCookies(signedIn).join("\n");
+    const cookies = setCookieLines(signedIn).join("\n");
     assert.match(cookies, /HttpOnly/i);
     assert.match(cookies, /Secure/i);
     assert.match(cookies, /SameSite=Lax/i);
@@ -186,9 +187,9 @@ describe("identity auth", { concurrency: 1 }, () => {
     probe.hits = 0;
     const signedIn = await signIn(app, employeeEmail, employeePassword);
     assert.equal(signedIn.statusCode, 200, signedIn.body);
-    const response = await getProbe(app, cookieHeader(setCookies(signedIn)));
+    const response = await getProbe(app, cookieHeader(setCookieLines(signedIn)));
     assert.equal(response.statusCode, 403);
-    assert.equal(readError(response), "forbidden");
+    assert.equal(readErrorCode(response), "forbidden");
     assert.equal(probe.hits, 0);
   });
 
@@ -196,18 +197,18 @@ describe("identity auth", { concurrency: 1 }, () => {
     probe.hits = 0;
     const response = await getProbe(app, ownerCookie, randomUUID());
     assert.equal(response.statusCode, 403);
-    assert.equal(readError(response), "tenant_mismatch");
+    assert.equal(readErrorCode(response), "tenant_mismatch");
     assert.equal(probe.hits, 0);
     const anonymous = await app.inject({ method: "GET", url: "/api/v1/probe/pii" });
     assert.equal(anonymous.statusCode, 401);
-    assert.equal(readError(anonymous), "unauthenticated");
+    assert.equal(readErrorCode(anonymous), "unauthenticated");
   });
 
   it("challenges a privileged user without TOTP and then runs the handler", async () => {
     probe.hits = 0;
     const blocked = await getProbe(app, ownerCookie);
     assert.equal(blocked.statusCode, 403);
-    assert.equal(readError(blocked), "totp_enrollment_required");
+    assert.equal(readErrorCode(blocked), "totp_enrollment_required");
     const blockedBody = readBody(blocked);
     assert.equal(blockedBody.meta?.challenge, "totp_enrollment");
     assert.equal(probe.hits, 0);
@@ -237,12 +238,12 @@ describe("identity auth", { concurrency: 1 }, () => {
       app,
       "/api/auth/two-factor/verify-totp",
       { code: totpFromUri(enrollment.totpURI) },
-      mergeCookies(ownerCookie, setCookies(enabled)),
+      mergeCookies(ownerCookie, setCookieLines(enabled)),
     );
     assert.equal(verified.statusCode, 200, verified.body);
     const nextCookie = mergeCookies(ownerCookie, [
-      ...setCookies(enabled),
-      ...setCookies(verified),
+      ...setCookieLines(enabled),
+      ...setCookieLines(verified),
     ]);
     const allowed = await getProbe(app, nextCookie);
     assert.equal(allowed.statusCode, 200, allowed.body);
@@ -264,7 +265,7 @@ describe("identity auth", { concurrency: 1 }, () => {
     assert.notEqual(wrongCode.statusCode, 200);
     const unverified = await getProbe(app, nextCookie);
     assert.equal(unverified.statusCode, 403);
-    assert.equal(readError(unverified), "totp_verification_required");
+    assert.equal(readErrorCode(unverified), "totp_verification_required");
     assert.equal(probe.hits, 1);
     const afterVerify = await superuserQuery<{ two_factor_enabled: boolean | null }>(
       "SELECT two_factor_enabled FROM ba_user WHERE email = $1",
@@ -295,7 +296,7 @@ describe("identity auth", { concurrency: 1 }, () => {
       const blockedLogin = loginResponses[3];
       assert.ok(blockedLogin);
       assert.equal(blockedLogin.statusCode, 429);
-      assert.equal(readError(blockedLogin), "rate_limited");
+      assert.equal(readErrorCode(blockedLogin), "rate_limited");
 
       await appDb.pool.query("DELETE FROM id_rate_limits");
       const resetStatuses: number[] = [];
@@ -442,9 +443,9 @@ describe("identity auth", { concurrency: 1 }, () => {
     const signedIn = await signIn(app, "a-owner@gotonghr.test", ownerPassword);
     assert.equal(signedIn.statusCode, 200, signedIn.body);
     probe.hits = 0;
-    const switched = await getProbe(app, cookieHeader(setCookies(signedIn)), tenantB.tenantId);
+    const switched = await getProbe(app, cookieHeader(setCookieLines(signedIn)), tenantB.tenantId);
     assert.equal(switched.statusCode, 403);
-    assert.equal(readError(switched), "tenant_mismatch");
+    assert.equal(readErrorCode(switched), "tenant_mismatch");
     assert.equal(probe.hits, 0);
   });
 
@@ -563,20 +564,6 @@ function getProbe(app: FastifyInstance, cookie: string, tenantId?: string) {
   });
 }
 
-function setCookies(response: LightMyRequestResponse): string[] {
-  const raw = response.headers["set-cookie"];
-  if (typeof raw === "string") return [raw];
-  if (Array.isArray(raw)) return raw.map(String);
-  return [];
-}
-
-function cookieHeader(cookies: string[]): string {
-  return cookies
-    .map((line) => line.split(";")[0]?.trim() ?? "")
-    .filter((part) => part.includes("="))
-    .join("; ");
-}
-
 function mergeCookies(existing: string, cookies: string[]): string {
   const jar = new Map<string, string>();
   for (const part of existing.split(";")) {
@@ -600,10 +587,6 @@ function readBody(response: LightMyRequestResponse): {
     error: { code: string } | null;
     meta: { challenge?: string } | null;
   };
-}
-
-function readError(response: LightMyRequestResponse): string | undefined {
-  return readBody(response).error?.code;
 }
 
 function readEnable(body: string): { totpURI: string; backupCodes: string[] } {
@@ -656,46 +639,6 @@ function base32Decode(input: string): Buffer {
     }
   }
   return Buffer.from(bytes);
-}
-
-async function resetIdentity(): Promise<void> {
-  const admin = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
-  await admin.connect();
-  try {
-    await admin.query(`
-      TRUNCATE TABLE
-        id_sessions,
-        id_memberships,
-        id_users,
-        id_roles,
-        id_tenants,
-        id_rate_limits,
-        ba_two_factor,
-        ba_invitation,
-        ba_member,
-        ba_session,
-        ba_account,
-        ba_verification,
-        ba_organization,
-        ba_user
-    `);
-  } finally {
-    await admin.end();
-  }
-}
-
-async function superuserQuery<T extends pg.QueryResultRow>(
-  text: string,
-  values: unknown[],
-): Promise<T[]> {
-  const admin = new Client({ connectionString: requiredEnv(process.env, "DATABASE_URL_SUPERUSER") });
-  await admin.connect();
-  try {
-    const result = await admin.query<T>(text, values);
-    return result.rows;
-  } finally {
-    await admin.end();
-  }
 }
 
 function isPermissionDenied(error: unknown): boolean {
