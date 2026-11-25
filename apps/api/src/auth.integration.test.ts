@@ -110,8 +110,23 @@ describe("api identity", { concurrency: 1 }, () => {
   });
 
   it("keeps platform routes unmounted and sets secure cookies", async () => {
-    const platform = await composed.app.inject({ method: "GET", url: "/api/v1/platform/tenants" });
-    assert.equal(platform.statusCode, 404);
+    for (const url of [
+      "/api/v1/platform/tenants",
+      "/api/v1/platform/health/tenants",
+      "/api/v1/platform/statutory-tables",
+      "/api/v1/platform/support-grants/activate",
+      "/api/v1/platform/audit-events",
+    ]) {
+      const platform = await composed.app.inject({ method: "GET", url });
+      assert.equal(platform.statusCode, 404, url);
+    }
+    const activate = await composed.app.inject({
+      method: "POST",
+      url: "/api/v1/platform/support-grants/activate",
+      headers: { "content-type": "application/json" },
+      payload: { token: "not-a-token" },
+    });
+    assert.equal(activate.statusCode, 404);
     const signedIn = await signIn(ownerEmail, ownerPassword);
     const cookies = setCookies(signedIn).join("\n");
     assert.match(cookies, /HttpOnly/i);
@@ -347,6 +362,7 @@ async function resetIdentity(): Promise<void> {
         ba_verification,
         ba_organization,
         ba_user
+      CASCADE
     `);
   } finally {
     await admin.end();

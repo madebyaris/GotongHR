@@ -8,6 +8,7 @@
     "build": "pnpm --filter @gotonghr/ui build && vite build && node scripts/bundle-budget.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
+    "test": "node --test scripts/bundle-budget.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

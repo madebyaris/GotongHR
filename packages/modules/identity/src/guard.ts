@@ -8,6 +8,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import {
   membershipsForAuthUser,
   sessionHasTotpVerification,
+  tenantAccessForAuthUser,
   type MembershipRecord,
 } from "./directory.ts";
 
@@ -34,71 +35,81 @@ interface AuthSession {
   session: { id?: string; activeOrganizationId?: string };
 }
 
+type AuthChallenge = "totp_enrollment" | "totp_verification";
+
+export type AuthResult =
+  | { ok: true; context: GotongAuthContext }
+  | {
+      ok: false;
+      status: 400 | 401 | 403;
+      code: string;
+      message: string;
+      meta?: { challenge: AuthChallenge };
+    };
+
 /**
- * Order: session, tenant header, permission, then TOTP for privileged payroll/PII.
+ * Order: session, suspended tenant, tenant header, permission, then TOTP.
  * Scope flags are attached for later slices. This slice does not filter rows by them.
+ * Omit `permission` when the caller only needs a membership, such as a support grant.
  */
-export function requirePermission(atom: PermissionAtom) {
-  return async function permissionGuard(
-    request: FastifyRequest,
-    reply: FastifyReply,
-  ): Promise<void> {
-    const handle = request.server.gotongIdentity;
-    if (!handle) throw new Error("Identity plugin is not registered.");
-    const session = readSession(
-      await handle.auth.api.getSession({ headers: webHeaders(request.headers) }),
-    );
-    if (!session) {
-      await reply.code(401).send(fail("unauthenticated", "Sign in required."));
-      return;
+export async function authenticateRequest(
+  request: FastifyRequest,
+  options?: { permission?: PermissionAtom },
+): Promise<AuthResult> {
+  const handle = request.server.gotongIdentity;
+  if (!handle) throw new Error("Identity plugin is not registered.");
+  const session = readSession(
+    await handle.auth.api.getSession({ headers: webHeaders(request.headers) }),
+  );
+  if (!session) return denied(401, "unauthenticated", "Sign in required.");
+  const access = await tenantAccessForAuthUser(handle.appDb.pool, session.user.id);
+  const header = tenantHeader(request.headers);
+  if (
+    typeof header === "string" &&
+    access.some((row) => row.tenantId.toLowerCase() === header && row.status === "suspended")
+  ) {
+    return denied(403, "tenant_suspended", "Tenant is suspended.");
+  }
+  const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
+  if (memberships.length === 0 && access.some((row) => row.status === "suspended")) {
+    return denied(403, "tenant_suspended", "Tenant is suspended.");
+  }
+  const selected = selectMembership(memberships, header, session.session.activeOrganizationId);
+  if (selected === "none") return denied(403, "no_membership", "No active membership.");
+  if (selected === "mismatch") {
+    return denied(403, "tenant_mismatch", "The tenant header does not match a membership.");
+  }
+  if (selected === "required") return denied(400, "tenant_required", "Choose a tenant.");
+  const permission = options?.permission;
+  if (permission && !selected.permissions.includes(permission)) {
+    return denied(403, "forbidden", "Missing permission.");
+  }
+  const twoFactorEnabled = session.user.twoFactorEnabled === true;
+  let sessionTotpVerified = false;
+  if (permission && permissionRequiresPrivilegedTotp(permission) && isPrivilegedRole(selected.role)) {
+    if (!twoFactorEnabled) {
+      return denied(
+        403,
+        "totp_enrollment_required",
+        "Set up an authenticator before using this route.",
+        { challenge: "totp_enrollment" },
+      );
     }
-    const memberships = await membershipsForAuthUser(handle.appDb.pool, session.user.id);
-    const header = tenantHeader(request.headers);
-    const selected = selectMembership(memberships, header, session.session.activeOrganizationId);
-    if (selected === "none") {
-      await reply.code(403).send(fail("no_membership", "No active membership."));
-      return;
+    sessionTotpVerified = session.session.id
+      ? await sessionHasTotpVerification(handle.appDb, selected.tenantId, session.session.id)
+      : false;
+    if (!sessionTotpVerified) {
+      return denied(
+        403,
+        "totp_verification_required",
+        "Confirm this sign-in with an authenticator code.",
+        { challenge: "totp_verification" },
+      );
     }
-    if (selected === "mismatch") {
-      await reply.code(403).send(fail("tenant_mismatch", "The tenant header does not match a membership."));
-      return;
-    }
-    if (selected === "required") {
-      await reply.code(400).send(fail("tenant_required", "Choose a tenant."));
-      return;
-    }
-    if (!selected.permissions.includes(atom)) {
-      await reply.code(403).send(fail("forbidden", "Missing permission."));
-      return;
-    }
-    const twoFactorEnabled = session.user.twoFactorEnabled === true;
-    let sessionTotpVerified = false;
-    if (permissionRequiresPrivilegedTotp(atom) && isPrivilegedRole(selected.role)) {
-      if (!twoFactorEnabled) {
-        await reply.code(403).send(
-          fail(
-            "totp_enrollment_required",
-            "Set up an authenticator before using this route.",
-            { challenge: "totp_enrollment" },
-          ),
-        );
-        return;
-      }
-      sessionTotpVerified = session.session.id
-        ? await sessionHasTotpVerification(handle.appDb, selected.tenantId, session.session.id)
-        : false;
-      if (!sessionTotpVerified) {
-        await reply.code(403).send(
-          fail(
-            "totp_verification_required",
-            "Confirm this sign-in with an authenticator code.",
-            { challenge: "totp_verification" },
-          ),
-        );
-        return;
-      }
-    }
-    request.gotongAuth = {
+  }
+  return {
+    ok: true,
+    context: {
       tenantId: selected.tenantId,
       organizationId: selected.organizationId,
       authUserId: selected.authUserId,
@@ -112,8 +123,46 @@ export function requirePermission(atom: PermissionAtom) {
       selfOnly: selected.selfOnly,
       twoFactorEnabled,
       sessionTotpVerified,
-    };
+    },
   };
+}
+
+export function requireSession() {
+  return async function sessionGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await sendAuthResult(request, reply, await authenticateRequest(request));
+  };
+}
+
+export function requirePermission(atom: PermissionAtom) {
+  return async function permissionGuard(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await sendAuthResult(request, reply, await authenticateRequest(request, { permission: atom }));
+  };
+}
+
+function denied(
+  status: 400 | 401 | 403,
+  code: string,
+  message: string,
+  meta?: { challenge: AuthChallenge },
+): AuthResult {
+  if (meta) return { ok: false, status, code, message, meta };
+  return { ok: false, status, code, message };
+}
+
+async function sendAuthResult(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  result: AuthResult,
+): Promise<void> {
+  if (result.ok) {
+    request.gotongAuth = result.context;
+    return;
+  }
+  if (result.meta) {
+    await reply.code(result.status).send(fail(result.code, result.message, result.meta));
+    return;
+  }
+  await reply.code(result.status).send(fail(result.code, result.message));
 }
 
 function selectMembership(

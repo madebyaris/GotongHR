@@ -80,7 +80,36 @@ export async function singleTenantOwner(pool: pg.Pool): Promise<TenantOwnerRow |
   };
 }
 
-/** Pass the session user id. This function can see every tenant that user belongs to. */
+export interface TenantAccess {
+  tenantId: string;
+  status: "active" | "suspended";
+}
+
+/**
+ * Every membership, including a suspended tenant. Sign-in and the request
+ * guard use this. `membershipsForAuthUser` stays limited to active rows.
+ */
+export async function tenantAccessForAuthUser(
+  pool: pg.Pool,
+  authUserId: string,
+): Promise<TenantAccess[]> {
+  const result = await pool.query<{ tenant_id: string; status: string }>(
+    "SELECT tenant_id, status FROM id_tenant_access_for_auth_user($1)",
+    [authUserId],
+  );
+  return result.rows.flatMap((row) => {
+    if (row.status !== "active" && row.status !== "suspended") return [];
+    return [{ tenantId: row.tenant_id, status: row.status }];
+  });
+}
+
+/** True when the user has a membership and every one of those tenants is suspended. */
+export async function userIsSuspended(pool: pg.Pool, authUserId: string): Promise<boolean> {
+  const access = await tenantAccessForAuthUser(pool, authUserId);
+  return access.length > 0 && access.every((row) => row.status === "suspended");
+}
+
+/** Pass the session user id. This function can see every active tenant that user belongs to. */
 export async function membershipsForAuthUser(
   pool: pg.Pool,
   authUserId: string,

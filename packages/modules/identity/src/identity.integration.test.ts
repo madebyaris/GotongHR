@@ -182,6 +182,37 @@ describe("identity auth", { concurrency: 1 }, () => {
     assert.match(cookies, /SameSite=Lax/i);
   });
 
+  it("rejects a suspended tenant at sign-in and on the next request", async () => {
+    const fresh = await signIn(app, ownerEmail, ownerPassword);
+    assert.equal(fresh.statusCode, 200, fresh.body);
+    const cookie = cookieHeader(setCookies(fresh));
+    const beforeSessions = await superuserQuery<{ count: string }>(
+      "SELECT count(*)::text AS count FROM ba_session WHERE user_id = $1",
+      [authUserId],
+    );
+    const sessionsBefore = Number(beforeSessions[0]?.count ?? 0);
+    await superuserQuery("UPDATE id_tenants SET status = 'suspended' WHERE id = $1", [tenantId]);
+    try {
+      const blocked = await signIn(app, ownerEmail, ownerPassword);
+      assert.equal(blocked.statusCode, 403, blocked.body);
+      assert.match(blocked.body, /tenant_suspended/);
+      const afterSessions = await superuserQuery<{ count: string }>(
+        "SELECT count(*)::text AS count FROM ba_session WHERE user_id = $1",
+        [authUserId],
+      );
+      assert.equal(Number(afterSessions[0]?.count ?? 0), sessionsBefore);
+      const probe = await app.inject({
+        method: "GET",
+        url: "/api/v1/probe/pii",
+        headers: { origin, cookie },
+      });
+      assert.equal(probe.statusCode, 403);
+      assert.equal(readError(probe), "tenant_suspended");
+    } finally {
+      await superuserQuery("UPDATE id_tenants SET status = 'active' WHERE id = $1", [tenantId]);
+    }
+  });
+
   it("returns 403 for employee on employee.pii.read and does not run the handler", async () => {
     probe.hits = 0;
     const signedIn = await signIn(app, employeeEmail, employeePassword);
@@ -678,6 +709,7 @@ async function resetIdentity(): Promise<void> {
         ba_verification,
         ba_organization,
         ba_user
+      CASCADE
     `);
   } finally {
     await admin.end();

@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import type { TenantDatabase } from "@gotonghr/db";
 import { betterAuth } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { organization, twoFactor } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sessionCookieAttributes } from "./cookies.ts";
@@ -11,6 +11,7 @@ import {
   markSessionTotpVerified,
   provisionDirectory,
   recordSession,
+  userIsSuspended,
 } from "./directory.ts";
 import { readAuthSecret, readDeploymentMode, readTrustedOrigins } from "./env.ts";
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "./password.ts";
@@ -117,6 +118,17 @@ export function createAuth(input: CreateAuthInput): GotongAuth {
     databaseHooks: {
       session: {
         create: {
+          // Runs after the password check and before the session row is inserted.
+          // A suspended tenant must not receive a session.
+          before: async (session) => {
+            if (!session.userId) return;
+            if (await userIsSuspended(input.appDb.pool, session.userId)) {
+              throw new APIError("FORBIDDEN", {
+                message: "Tenant is suspended.",
+                code: "tenant_suspended",
+              });
+            }
+          },
           after: async (session, context) => {
             const totpVerified =
               totpVerification.getStore() === true || isTotpVerificationPath(endpointPath(context));

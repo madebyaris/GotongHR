@@ -5,10 +5,24 @@ import {
   requiredEnv,
   type TenantDatabase,
 } from "@gotonghr/db";
-import { createAuth, readTrustProxy, registerIdentity, type GotongAuth } from "@gotonghr/identity";
+import {
+  createAuth,
+  hashPassword,
+  readAuthSecret,
+  readTrustProxy,
+  registerIdentity,
+  type GotongAuth,
+} from "@gotonghr/identity";
+import {
+  openPlatformDatabase,
+  platformApiMounted,
+  readPlatformDatabaseUrl,
+  registerPlatform,
+} from "@gotonghr/platform";
 import { createStorage } from "@gotonghr/storage";
 import type { PgBoss } from "pg-boss";
 import { readConfig, type AppConfig } from "./config.ts";
+import { platformReaders } from "./platform-auth.ts";
 import { buildServer } from "./server.ts";
 import { MAINTENANCE_QUEUE, startBoss } from "./queue.ts";
 import type { FastifyInstance } from "fastify";
@@ -27,7 +41,7 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
   applyDatabaseUrls(env);
   const config = readConfig(env);
   const appDb = createTenantDatabase(requiredEnv(env, "DATABASE_URL_APP"));
-  const platformDb = createTenantDatabase(requiredEnv(env, "DATABASE_URL_PLATFORM"), 2);
+  const platformDb = await openPlatformDatabase(readPlatformDatabaseUrl(env));
   let boss: PgBoss | undefined;
   let app: FastifyInstance | undefined;
   try {
@@ -55,6 +69,16 @@ export async function composeFromEnv(env: NodeJS.ProcessEnv = process.env): Prom
     });
     const auth = createAuth({ appDb, env });
     await registerIdentity(app, { auth, appDb, env });
+    const readers = platformReaders({ auth, platform: platformDb });
+    await registerPlatform(app, {
+      platform: platformDb,
+      app: appDb,
+      mountPlatformRoutes: platformApiMounted(config.deploymentMode),
+      inviteSecret: readAuthSecret(env),
+      hashOwnerPassword: hashPassword,
+      readPlatformActor: readers.readPlatformActor,
+      readTenantAdmin: readers.readTenantAdmin,
+    });
     const runningApp = app;
 
     return {

@@ -121,7 +121,13 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ["**/packages/modules/**"],
+              group: [
+                "**/packages/modules/**",
+                "@gotonghr/identity",
+                "@gotonghr/identity/*",
+                "@gotonghr/platform",
+                "@gotonghr/platform/*",
+              ],
               message: boundaryMessage,
             },
           ],

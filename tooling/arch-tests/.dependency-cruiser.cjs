@@ -13,6 +13,22 @@ module.exports = {
       },
     },
     {
+      name: "platform-does-not-import-identity",
+      severity: "error",
+      comment:
+        "Platform talks to identity through apps/api. It does not import the identity module.",
+      from: { path: "^packages/modules/platform/" },
+      to: { path: "^packages/modules/identity/" },
+    },
+    {
+      name: "identity-does-not-import-platform",
+      severity: "error",
+      comment:
+        "Identity does not import the platform module. Wiring stays in apps/api.",
+      from: { path: "^packages/modules/identity/" },
+      to: { path: "^packages/modules/platform/" },
+    },
+    {
       name: "payroll-engine-stays-pure",
       severity: "error",
       comment:

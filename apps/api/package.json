@@ -7,8 +7,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/storage build && pnpm --filter @gotonghr/identity build",
-    "prebootstrap": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/identity build",
+    "pretest": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/storage build && pnpm --filter @gotonghr/identity build && pnpm --filter @gotonghr/platform build",
+    "prebootstrap": "pnpm --filter @gotonghr/contracts build && pnpm --filter @gotonghr/db build && pnpm --filter @gotonghr/identity build && pnpm --filter @gotonghr/platform build",
     "bootstrap": "node --experimental-strip-types src/entrypoints/bootstrap.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=1 --test-reporter spec src/*.test.ts",
     "start": "node dist/entrypoints/monolith.js"
@@ -17,6 +17,7 @@
     "@gotonghr/contracts": "workspace:*",
     "@gotonghr/db": "workspace:*",
     "@gotonghr/identity": "workspace:*",
+    "@gotonghr/platform": "workspace:*",
     "@gotonghr/storage": "workspace:*",
     "fastify": "5.12.8",
     "fastify-type-provider-zod": "7.0.0",

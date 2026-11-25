@@ -397,6 +397,26 @@ const resolverFunctions: ReadonlyArray<{ signature: string; body: string }> = [
     `,
   },
   {
+    signature: "id_tenant_access_for_auth_user(text)",
+    body: `
+      CREATE FUNCTION id_tenant_access_for_auth_user(p_auth_user_id text)
+      RETURNS TABLE (
+        tenant_id uuid,
+        status text
+      )
+      LANGUAGE sql
+      STABLE
+      SECURITY DEFINER
+      SET search_path = public
+      AS $$
+        SELECT t.id, t.status
+        FROM id_memberships m
+        JOIN id_tenants t ON t.id = m.tenant_id
+        WHERE m.auth_user_id = p_auth_user_id;
+      $$
+    `,
+  },
+  {
     signature: "id_memberships_for_auth_user(text)",
     body: `
       CREATE FUNCTION id_memberships_for_auth_user(p_auth_user_id text)
